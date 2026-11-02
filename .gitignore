@@ -1,0 +1,18 @@
+# Python
+venv/
+.venv/
+__pycache__/
+*.pyc
+
+# Django
+db.sqlite3
+.env
+media/
+
+# Thư mục tạm / backup
+_backup/
+.taste-skill/
+.ipynb_checkpoints/
+
+# Bỏ dấu # dòng dưới nếu không muốn đẩy file báo cáo Word
+# *.docx

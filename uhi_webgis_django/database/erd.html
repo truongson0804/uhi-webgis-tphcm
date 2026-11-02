@@ -1,0 +1,109 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+<meta charset="UTF-8">
+<title>Sơ đồ quan hệ CSDL uhi_webgis</title>
+<style>
+  body { margin:0; background:#fff; font-family:'Segoe UI', Arial, sans-serif; color:#111827; }
+  #canvas { position:relative; width:1640px; height:1480px; }
+  h1 { position:absolute; left:40px; top:18px; margin:0; font-size:24px; }
+  .sub { position:absolute; left:40px; top:54px; font-size:14px; color:#4B5563; }
+  .tbl { position:absolute; width:420px; border:1.5px solid #374151; border-radius:8px; background:#fff; overflow:hidden; box-shadow:0 2px 6px rgba(0,0,0,.08); }
+  .tbl .h { padding:8px 12px; font-weight:700; font-size:15px; color:#fff; display:flex; justify-content:space-between; }
+  .tbl .h small { font-weight:400; opacity:.85; font-size:12px; }
+  .g1 .h { background:#1D4ED8; } .g2 .h { background:#047857; } .g3 .h { background:#B45309; } .g4 .h { background:#6B7280; }
+  .tbl .r { display:grid; grid-template-columns:34px 1fr auto; padding:3px 12px; font-size:13px; border-top:1px solid #E5E7EB; }
+  .tbl .r .k { font-weight:700; font-size:11px; color:#B91C1C; }
+  .tbl .r .k.fk { color:#1D4ED8; }
+  .tbl .r .t { color:#6B7280; font-family:Consolas, monospace; font-size:12px; }
+  .tbl .r.geo { background:#ECFDF5; }
+  .tbl .r.geo .t { color:#047857; font-weight:600; }
+  svg { position:absolute; left:0; top:0; width:1640px; height:1480px; pointer-events:none; overflow:visible; }
+  .legend { position:absolute; left:40px; top:1390px; font-size:13px; color:#374151; line-height:1.7; }
+  .legend b { display:inline-block; width:14px; height:14px; border-radius:3px; vertical-align:-2px; margin:0 6px 0 16px; }
+  .legend b:first-child { margin-left:0; }
+</style>
+</head>
+<body>
+<div id="canvas">
+  <h1>Sơ đồ quan hệ cơ sở dữ liệu (ERD) — uhi_webgis</h1>
+  <div class="sub">PostgreSQL 18 + PostGIS 3.6 · hệ tọa độ WGS84 (SRID 4326) · 10 bảng, 4 cột hình học có chỉ mục không gian GIST · bảng do Django tạo, tiền tố <code>dashboard_</code></div>
+  <svg id="lines"></svg>
+</div>
+<div class="legend" id="legend"></div>
+<script>
+// Cấu trúc lấy đúng từ information_schema của CSDL thật (xem schema.sql)
+const T = {
+  region: { g:'g1', x:610, y:100, note:'1 dòng', cols:[
+    ['PK','id','bigint'],['','name','varchar'],['','description','text'],['','boundary','geometry(Polygon,4326)','geo'],['','area_km2','double']]},
+  yearlymetric: { g:'g1', x:40, y:390, note:'7 dòng', cols:[
+    ['PK','id','bigint'],['FK','region_id','bigint'],['','year','integer (unique)'],['','avg_lst','double'],['','avg_ndvi','double'],
+    ['','avg_ndbi','double'],['','avg_ndwi','double'],['','r_lst_ndbi','double'],['','r_lst_ndvi','double'],['','corr_n_points','integer'],['','heatmap_image','varchar']]},
+  utfvizone: { g:'g1', x:610, y:390, note:'49 dòng', cols:[
+    ['PK','id','bigint'],['FK','region_id','bigint'],['','year','integer'],['','class_name','varchar'],['','area_km2','double'],['','color_hex','varchar'],['','order','smallint']]},
+  urbanizationforecast: { g:'g1', x:1180, y:390, note:'3 dòng', cols:[
+    ['PK','id','bigint'],['FK','region_id','bigint'],['','year','integer (unique)'],['','urban_ratio_percent','double'],['','is_forecast','boolean']]},
+  district: { g:'g2', x:610, y:780, note:'38 dòng', cols:[
+    ['PK','id','bigint'],['','code','integer (unique)'],['','name_gaul','varchar'],['','name_vi','varchar'],['','province','varchar'],['','boundary','geometry(MultiPolygon,4326)','geo']]},
+  districtyearstat: { g:'g2', x:40, y:780, note:'266 dòng', cols:[
+    ['PK','id','bigint'],['FK','district_id','bigint'],['','year','integer'],['','lst','double'],['','ndvi','double'],['','ndbi','double'],['','ndwi','double']]},
+  gridcell: { g:'g2', x:1180, y:780, note:'46.521 dòng', cols:[
+    ['PK','id','bigint'],['FK','district_id','bigint (null)'],['','year','integer'],['','center','geometry(Point,4326)','geo'],['','lst','double'],['','ndvi','double'],['','ndbi','double'],['','ndwi','double'],['','coverage','double']]},
+  heatsamplepoint: { g:'g3', x:40, y:1150, note:'13.189 dòng', cols:[
+    ['PK','id','bigint'],['','year','integer'],['','location','geometry(Point,4326)','geo'],['','lst','double'],['','ndvi','double'],['','ndbi','double'],['','n_obs','integer']]},
+  lstforecast: { g:'g4', x:610, y:1150, note:'4 dòng', cols:[
+    ['PK','id','bigint'],['','year','integer (unique)'],['','lst_linear','double'],['','lst_poly','double'],['','r2_linear','double'],['','r2_poly','double']]},
+  forecastbacktest: { g:'g4', x:1180, y:1150, note:'2 dòng', cols:[
+    ['PK','id','bigint'],['','model','varchar (unique)'],['','train_years','varchar'],['','pred_2026','double'],['','actual_2026','double'],['','error','double']]},
+};
+const cv = document.getElementById('canvas');
+for (const [name, t] of Object.entries(T)) {
+  const d = document.createElement('div');
+  d.className = `tbl ${t.g}`; d.id = name; d.style.left = t.x + 'px'; d.style.top = t.y + 'px';
+  d.innerHTML = `<div class="h">dashboard_${name}<small>${t.note}</small></div>` + t.cols.map(([k, c, ty, geo]) =>
+    `<div class="r ${geo || ''}"><span class="k ${k === 'FK' ? 'fk' : ''}">${k}</span><span>${c}</span><span class="t">${ty}</span></div>`).join('');
+  cv.appendChild(d);
+}
+// Quan hệ 1 – N theo khóa ngoại (FOREIGN KEY trong schema.sql)
+const REL = [['region', 'yearlymetric'], ['region', 'utfvizone'], ['region', 'urbanizationforecast'],
+             ['district', 'districtyearstat'], ['district', 'gridcell']];
+const svg = document.getElementById('lines'), box = id => document.getElementById(id).getBoundingClientRect();
+let html = '';
+REL.forEach(([p, c]) => {
+  const a = box(p), b = box(c);
+  const right = b.left > a.left;
+  let path, l1, lN;
+  if (Math.abs(a.left - b.left) < 5) {            // cùng cột: thẳng xuống
+    const x = a.left + a.width / 2;
+    path = `M${x} ${a.bottom} L${x} ${b.top}`; l1 = [x + 8, a.bottom + 18]; lN = [x + 8, b.top - 8];
+  } else if (Math.abs(a.top - b.top) < 5) {       // cùng hàng: nối ngang cạnh bên
+    const y = a.top + 22, x1 = right ? a.right : a.left, x2 = right ? b.left : b.right;
+    path = `M${x1} ${y} L${x2} ${y}`; l1 = [x1 + (right ? 8 : -18), y - 6]; lN = [x2 + (right ? -20 : 8), y - 6];
+  } else {                                        // khác hàng, khác cột: gấp khúc
+    const x1 = right ? a.right : a.left, y1 = a.top + 22, x2 = b.left + b.width / 2;
+    path = `M${x1} ${y1} L${x2} ${y1} L${x2} ${b.top}`; l1 = [x1 + (right ? 8 : -18), y1 - 6]; lN = [x2 + 8, b.top - 8];
+  }
+  html += `<path d="${path}" fill="none" stroke="#374151" stroke-width="1.8"/>
+    <text x="${l1[0]}" y="${l1[1]}" font-size="14" font-weight="700" fill="#B91C1C">1</text>
+    <text x="${lN[0]}" y="${lN[1]}" font-size="14" font-weight="700" fill="#1D4ED8">N</text>`;
+});
+// Quan hệ không gian (không phải khóa ngoại): ST_Within / ST_Contains / KNN
+const sp = [['district', 'heatsamplepoint', 'ST_Contains (truy vấn)']];
+sp.forEach(([p, c, label]) => {
+  const a = box(p), b = box(c);
+  // từ đáy bảng district xuống, chạy ngang trong khoảng trống giữa 2 hàng, rồi xuống bảng điểm mẫu
+  const x1 = a.left + a.width / 2, ym = (a.bottom + b.top) / 2 + 20, x2 = b.left + b.width / 2;
+  html += `<path d="M${x1} ${a.bottom} L${x1} ${ym} L${x2} ${ym} L${x2} ${b.top}" fill="none" stroke="#047857" stroke-width="1.6" stroke-dasharray="6 5"/>
+    <text x="${(x1 + x2) / 2}" y="${ym - 8}" text-anchor="middle" font-size="13" fill="#047857">${label}: điểm mẫu nằm trong quận/huyện</text>`;
+});
+svg.innerHTML = html;
+document.getElementById('legend').innerHTML =
+  '<b style="background:#1D4ED8"></b>Dữ liệu tổng hợp toàn vùng (notebook mục 5, 8, 9, 12)' +
+  '<b style="background:#047857"></b>Quận/huyện + lưới 1 km (mục 9d)' +
+  '<b style="background:#B45309"></b>Điểm mẫu pixel 100 m (mục 9b)' +
+  '<b style="background:#6B7280"></b>Dự báo & kiểm định (mục 11, 11b)<br>' +
+  '<span style="color:#B91C1C;font-weight:700">PK</span> khóa chính · <span style="color:#1D4ED8;font-weight:700">FK</span> khóa ngoại · ' +
+  'nét liền 1–N: ràng buộc FOREIGN KEY · nét đứt xanh: quan hệ không gian qua truy vấn PostGIS · dòng nền xanh: cột hình học (có chỉ mục GIST)';
+</script>
+</body>
+</html>

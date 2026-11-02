@@ -1,0 +1,338 @@
+{% load static %}
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>WebGIS Đảo nhiệt đô thị TP.HCM 2020–2026</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="{% static 'dashboard/vendor/leaflet.css' %}"/>
+<style>
+  :root {
+    --bg: #0A1020; --panel: #111B2E; --panel-2: #0D1526; --border: rgba(255,255,255,0.09);
+    --text: #EAF0FA; --muted: #93A0BE; --cool: #2DD4BF; --warm1: #F5A623; --warm2: #E4572E; --hot: #E4463F;
+    --grad: linear-gradient(90deg,#2563EB 0%,#2DD4BF 22%,#F5D547 48%,#F5A623 68%,#E4572E 84%,#E4463F 100%);
+  }
+  * { box-sizing: border-box; }
+  body { margin:0; background:var(--bg); color:var(--text); font-family:'Inter',system-ui,sans-serif; -webkit-font-smoothing:antialiased; }
+  .num { font-family:'Space Grotesk','Inter',sans-serif; font-variant-numeric: tabular-nums; }
+  .shell { max-width:1180px; margin:0 auto; padding:0 24px 80px; }
+  header.top { display:flex; align-items:center; justify-content:space-between; padding:28px 24px 20px; max-width:1180px; margin:0 auto; }
+  header.top .place { color:var(--muted); font-size:13px; }
+  header.top .place strong { color:var(--text); }
+  header.top .badge { font-size:11px; color:var(--cool); border:1px solid var(--cool); border-radius:999px; padding:3px 10px; margin-left:10px; }
+  .hero { position:relative; padding:8px 0 40px; }
+  .hero .bar { height:6px; border-radius:3px; background:var(--grad); margin-bottom:32px; }
+  .hero h1 { font-family:'Space Grotesk',sans-serif; font-weight:700; font-size:clamp(28px,4.2vw,46px); line-height:1.1; margin:0 0 18px; max-width:16ch; }
+  .hero p.lede { max-width:64ch; color:var(--muted); font-size:16px; line-height:1.6; margin:0 0 36px; }
+  .kpis { display:grid; grid-template-columns:repeat(4,1fr); gap:1px; background:var(--border); border:1px solid var(--border); border-radius:14px; overflow:hidden; }
+  .kpi { background:var(--panel); padding:20px 18px; }
+  .kpi .label { color:var(--muted); font-size:12.5px; margin-bottom:8px; }
+  .kpi .value { font-size:26px; font-weight:600; }
+  .kpi .value span.unit { font-size:14px; color:var(--muted); margin-left:2px; }
+  .kpi .delta { font-size:12.5px; margin-top:6px; color:var(--muted); }
+  .year-tabs { display:flex; flex-wrap:wrap; gap:8px; margin-top:22px; }
+  .year-tab { font-family:'Space Grotesk',sans-serif; font-size:14px; font-weight:600; padding:8px 16px; border-radius:999px; border:1px solid var(--border); background:transparent; color:var(--muted); cursor:pointer; }
+  .year-tab.active { background:#C2410C; border-color:#C2410C; color:#fff; }
+  section { padding:48px 0; border-top:1px solid var(--border); }
+  section .head { margin-bottom:24px; }
+  section h2 { font-family:'Space Grotesk',sans-serif; font-size:22px; font-weight:600; margin:0 0 8px; }
+  section p.desc { color:var(--muted); font-size:14.5px; max-width:68ch; line-height:1.6; margin:0; }
+  .panel { background:var(--panel); border:1px solid var(--border); border-radius:14px; padding:20px; }
+  .chart-wrap { position:relative; height:360px; }
+  #leafletMap { height:460px; border-radius:10px; }
+  .grid-2 { display:grid; grid-template-columns:1.15fr .85fr; gap:20px; }
+  @media (max-width:860px) { .grid-2 { grid-template-columns:1fr; } .kpis { grid-template-columns:repeat(2,1fr); } }
+  .figure img { width:100%; height:auto; display:block; border-radius:10px; }
+  .figure figcaption { color:var(--muted); font-size:12.5px; margin-top:10px; line-height:1.5; }
+  .stat-line { display:flex; align-items:baseline; justify-content:space-between; padding:12px 0; border-bottom:1px solid var(--border); }
+  .stat-line:last-child { border-bottom:none; }
+  .stat-line .k { color:var(--muted); font-size:13.5px; }
+  .stat-line .v { font-size:19px; font-weight:600; }
+  .utfvi-row { display:grid; grid-template-columns:126px 1fr 88px; align-items:center; gap:12px; padding:9px 0; }
+  .utfvi-row .track { height:10px; background:var(--panel-2); border-radius:6px; overflow:hidden; border:1px solid var(--border); }
+  .utfvi-row .fill { height:100%; border-radius:6px; }
+  .utfvi-row .area { text-align:right; font-size:12.5px; color:var(--muted); }
+  table.data { width:100%; border-collapse:collapse; font-size:13.5px; }
+  table.data th, table.data td { text-align:right; padding:10px 9px; border-bottom:1px solid var(--border); }
+  table.data th:first-child, table.data td:first-child { text-align:left; color:var(--muted); }
+  table.data thead th { color:var(--muted); font-weight:500; font-size:12px; }
+  tr.row-active { background: rgba(194,65,12,0.12); }
+  .api-badge { display:inline-flex; align-items:center; gap:6px; font-size:11.5px; color:var(--muted); border:1px dashed var(--border); border-radius:6px; padding:4px 8px; font-family:'Space Grotesk',sans-serif; }
+  .map-note { display:flex; align-items:center; justify-content:center; text-align:center; min-height:200px; color:var(--muted); font-size:13.5px; line-height:1.6; padding:28px; }
+  footer { border-top:1px solid var(--border); padding:30px 0 12px; color:var(--muted); font-size:12.5px; line-height:1.7; }
+  footer strong { color:var(--text); }
+</style>
+</head>
+<body>
+
+<header class="top">
+  <div class="place"><strong>TP. Hồ Chí Minh</strong> · Đảo nhiệt đô thị <span class="badge">Django + PostGIS</span></div>
+  <div class="place">2020 – 2026</div>
+</header>
+
+<div class="shell">
+  <div class="hero">
+    <div class="bar"></div>
+    <h1>Thành phố đang nóng lên theo từng mảng bê tông mới</h1>
+    <p class="lede">Ứng dụng WebGIS phân tích, đánh giá và mô phỏng đảo nhiệt đô thị (UHI) tại TP. Hồ Chí Minh 2020–2026 — dữ liệu được lưu trong PostgreSQL/PostGIS, phục vụ qua REST API (Django), hiển thị bằng Leaflet và Chart.js.</p>
+
+    <div class="kpis">
+      <div class="kpi live">
+        <div class="label" id="kpiLstLabel">Nhiệt độ bề mặt trung bình</div>
+        <div class="value num" id="kpiLstValue">—</div>
+        <div class="delta" id="kpiLstDelta"></div>
+      </div>
+      <div class="kpi">
+        <div class="label">Tương quan LST ~ NDBI (bê tông hoá)</div>
+        <div class="value num">r = 0,63</div>
+        <div class="delta">Càng nhiều bê tông, càng nóng</div>
+      </div>
+      <div class="kpi">
+        <div class="label">Tương quan LST ~ NDVI (cây xanh)</div>
+        <div class="value num">r = −0,25</div>
+        <div class="delta">Cây xanh giúp hạ nhiệt bề mặt</div>
+      </div>
+      <div class="kpi">
+        <div class="label">Đô thị hoá dự báo đến 2030</div>
+        <div class="value num" id="kpiUrbanValue">—</div>
+        <div class="delta">Mô phỏng chuỗi Markov</div>
+      </div>
+    </div>
+
+    <div class="year-tabs" id="yearTabs"></div>
+  </div>
+
+  <section id="trend">
+    <div class="head">
+      <h2>Xu hướng nhiệt độ bề mặt và thực vật</h2>
+      <p class="desc">Nguồn: <span class="api-badge">GET /api/yearly-metrics/</span> — dữ liệu thật từ notebook phân tích, lưu trong bảng <code>YearlyMetric</code> (PostgreSQL).</p>
+    </div>
+    <div class="panel"><div class="chart-wrap"><canvas id="trendChart"></canvas></div></div>
+  </section>
+
+  <section id="map">
+    <div class="head">
+      <h2 id="mapTitle">Bản đồ nhiệt độ bề mặt — năm 2026</h2>
+      <p class="desc">Nguồn: <span class="api-badge">GET /api/region/</span> + <span class="api-badge">GET /api/yearly-metrics/&lt;year&gt;/</span> — ranh giới vùng nghiên cứu là hình học PostGIS thật, hiển thị bằng Leaflet.</p>
+    </div>
+    <div class="panel">
+      <div id="leafletMap"></div>
+      <figcaption style="color:var(--muted);font-size:12.5px;margin-top:10px;">Thang màu: 25°C (xanh dương) đến 45°C (đỏ đậm). Đường viền: ranh giới vùng nghiên cứu (Region.boundary trong PostGIS).</figcaption>
+    </div>
+  </section>
+
+  <section id="correlation">
+    <div class="head">
+      <h2>Vì sao có nơi nóng hơn nơi khác</h2>
+      <p class="desc">Lấy mẫu hơn 2.000 điểm ảnh năm 2026, đối chiếu nhiệt độ bề mặt với chỉ số thực vật và chỉ số xây dựng.</p>
+    </div>
+    <div class="grid-2">
+      <figure class="figure panel"><img src="{% static 'dashboard/correlation_lst.jpg' %}" alt="Biểu đồ tương quan LST với NDVI và NDBI"></figure>
+      <div class="panel">
+        <div class="stat-line"><div class="k">Hệ số tương quan LST ~ NDVI</div><div class="v num">−0,25</div></div>
+        <div class="stat-line"><div class="k">Hệ số tương quan LST ~ NDBI</div><div class="v num">0,63</div></div>
+        <div class="stat-line"><div class="k">Số điểm mẫu</div><div class="v num">~2.000</div></div>
+        <p class="desc" style="margin-top:16px">Tương quan với NDBI (bê tông, mái nhà, đường nhựa) rõ rệt hơn nhiều so với NDVI — mật độ xây dựng là yếu tố chi phối chính của đảo nhiệt tại TP.HCM.</p>
+      </div>
+    </div>
+  </section>
+
+  <section id="utfvi">
+    <div class="head">
+      <h2>Phân vùng cường độ đảo nhiệt — năm 2026</h2>
+      <p class="desc">Nguồn: <span class="api-badge">GET /api/utfvi-zones/?year=2026</span> — bảng <code>UTFVIZone</code> trong PostGIS.</p>
+    </div>
+    <div class="panel" id="utfviList"></div>
+  </section>
+
+  <section id="markov">
+    <div class="head">
+      <h2>Mô phỏng đô thị hoá đến năm 2030</h2>
+      <p class="desc">Nguồn: <span class="api-badge">GET /api/urbanization/</span> — ma trận chuyển đổi Markov ước lượng từ dữ liệu lớp phủ đất hai thời điểm.</p>
+    </div>
+    <div class="grid-2">
+      <figure class="figure panel"><img src="{% static 'dashboard/markov_urbanization.jpg' %}" alt="Biểu đồ mô phỏng đô thị hoá Markov"></figure>
+      <div class="panel" id="urbanStats"></div>
+    </div>
+  </section>
+
+  <section id="data">
+    <div class="head">
+      <h2>Bảng số liệu đầy đủ</h2>
+      <p class="desc">Nguồn: <span class="api-badge">GET /api/yearly-metrics/</span></p>
+    </div>
+    <div class="panel">
+      <table class="data">
+        <thead><tr><th>Năm</th><th>LST (°C)</th><th>NDVI</th><th>NDBI</th><th>NDWI</th></tr></thead>
+        <tbody id="dataTableBody"></tbody>
+      </table>
+    </div>
+  </section>
+
+  <footer>
+    <strong>Phân tích, đánh giá và mô phỏng Đảo nhiệt đô thị TP. Hồ Chí Minh (2020–2026)</strong><br>
+    Đồ án chuyên ngành Tin học Môi trường. Backend: Django + Django REST Framework + PostgreSQL/PostGIS. Frontend: Leaflet.js, Chart.js. Dữ liệu gốc: Landsat 8/9 (USGS/NASA), xử lý trên Google Earth Engine.
+  </footer>
+</div>
+
+<script src="{% static 'dashboard/vendor/chart.umd.js' %}"></script>
+<script src="{% static 'dashboard/vendor/leaflet.js' %}"></script>
+<script>
+const API = {
+  region: "/api/region/",
+  yearly: "/api/yearly-metrics/",
+  yearDetail: (y) => `/api/yearly-metrics/${y}/`,
+  utfvi: (y) => `/api/utfvi-zones/?year=${y}`,
+  urban: "/api/urbanization/",
+};
+
+function fmt(n, d = 1) {
+  return Number(n).toLocaleString('vi-VN', { minimumFractionDigits: d, maximumFractionDigits: d });
+}
+
+let rows = [];
+let regionGeoJSON = null;
+let trendChart = null;
+let leafletMap = null;
+let currentOverlay = null;
+let boundaryLayer = null;
+let selectedYear = 2026;
+const REAL_MAP_YEAR = 2026;
+
+async function boot() {
+  const [yearlyRes, regionRes, urbanRes] = await Promise.all([
+    fetch(API.yearly).then(r => r.json()),
+    fetch(API.region).then(r => r.json()),
+    fetch(API.urban).then(r => r.json()),
+  ]);
+  rows = yearlyRes;
+  regionGeoJSON = regionRes;
+
+  buildTrendChart();
+  buildTable();
+  buildYearTabs();
+  buildMap();
+  buildUrbanStats(urbanRes);
+  await selectYear(REAL_MAP_YEAR);
+
+  const kpiUrban = urbanRes.find(u => u.year === 2030);
+  if (kpiUrban) document.getElementById('kpiUrbanValue').innerHTML = `${fmt(kpiUrban.urban_ratio_percent,1)}<span class="unit">%</span>`;
+}
+
+function buildTrendChart() {
+  const ctx = document.getElementById('trendChart').getContext('2d');
+  trendChart = new Chart(ctx, {
+    type: 'line',
+    data: {
+      labels: rows.map(r => r.year),
+      datasets: [
+        { label: 'LST trung bình (°C)', data: rows.map(r => r.avg_lst), borderColor: '#C2410C', backgroundColor: 'rgba(194,65,12,0.08)', yAxisID: 'y', tension: 0.3, pointRadius: 4, pointBackgroundColor: '#C2410C', borderWidth: 2.5 },
+        { label: 'NDVI trung bình', data: rows.map(r => r.avg_ndvi), borderColor: '#0E9488', backgroundColor: 'rgba(14,148,136,0.08)', yAxisID: 'y1', tension: 0.3, pointRadius: 4, pointBackgroundColor: '#0E9488', borderWidth: 2.5, borderDash: [5,4] },
+      ],
+    },
+    options: {
+      responsive: true, maintainAspectRatio: false, interaction: { mode: 'index', intersect: false },
+      plugins: { legend: { position:'top', align:'start', labels:{ color:'#93A0BE', usePointStyle:true, boxWidth:8 } } },
+      scales: {
+        x: { grid:{ color:'rgba(255,255,255,0.08)' }, ticks:{ color:'#93A0BE' } },
+        y: { position:'left', title:{ display:true, text:'°C', color:'#93A0BE' }, grid:{ color:'rgba(255,255,255,0.08)' }, ticks:{ color:'#93A0BE' } },
+        y1: { position:'right', title:{ display:true, text:'NDVI', color:'#93A0BE' }, grid:{ display:false }, ticks:{ color:'#93A0BE' } },
+      },
+    },
+  });
+}
+
+function buildTable() {
+  document.getElementById('dataTableBody').innerHTML = rows.map(r => `
+    <tr data-year="${r.year}">
+      <td>${r.year}</td><td class="num">${fmt(r.avg_lst,2)}</td><td class="num">${fmt(r.avg_ndvi,3)}</td>
+      <td class="num">${fmt(r.avg_ndbi,3)}</td><td class="num">${fmt(r.avg_ndwi,3)}</td>
+    </tr>`).join('');
+}
+
+function buildYearTabs() {
+  document.getElementById('yearTabs').innerHTML = rows.map(r => `
+    <button type="button" class="year-tab${r.year===selectedYear?' active':''}" data-year="${r.year}">${r.year}</button>
+  `).join('');
+  document.querySelectorAll('.year-tab').forEach(btn => {
+    btn.addEventListener('click', () => selectYear(parseInt(btn.dataset.year, 10)));
+  });
+}
+
+function buildMap() {
+  leafletMap = L.map('leafletMap', { scrollWheelZoom: false }).setView([10.6, 106.8], 8);
+  L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { attribution: '&copy; OpenStreetMap' }).addTo(leafletMap);
+  boundaryLayer = L.geoJSON(regionGeoJSON.boundary_geojson, { style: { color:'#F5A623', weight:2, fillOpacity:0.03 } }).addTo(leafletMap);
+  leafletMap.fitBounds(boundaryLayer.getBounds());
+}
+
+function buildUrbanStats(urban) {
+  const rowsHtml = urban.map(u => `
+    <div class="stat-line"><div class="k">Tỉ lệ đô thị hoá ${u.year}${u.is_forecast ? ' (dự báo)' : ''}</div><div class="v num">${fmt(u.urban_ratio_percent,1)}%</div></div>
+  `).join('');
+  document.getElementById('urbanStats').innerHTML = rowsHtml + `<p class="desc" style="margin-top:16px">Diện tích đô thị hoá tăng đều mỗi năm — nguy cơ mở rộng vùng đảo nhiệt sang các khu vực hiện còn đất trống/nông nghiệp.</p>`;
+}
+
+async function selectYear(year) {
+  selectedYear = year;
+  document.querySelectorAll('.year-tab').forEach(btn => {
+    const active = parseInt(btn.dataset.year,10) === year;
+    btn.classList.toggle('active', active);
+  });
+
+  const r = rows.find(x => x.year === year);
+  const peak = rows.reduce((a,b) => b.avg_lst > a.avg_lst ? b : a, rows[0]);
+  document.getElementById('kpiLstLabel').textContent = `Nhiệt độ bề mặt trung bình ${year}`;
+  document.getElementById('kpiLstValue').innerHTML = `${fmt(r.avg_lst,1)}<span class="unit">°C</span>`;
+  document.getElementById('kpiLstDelta').textContent = year === peak.year ? 'Đỉnh giai đoạn 2020–2026' : `Đỉnh giai đoạn: ${fmt(peak.avg_lst,1)}°C (${peak.year})`;
+
+  const pr = rows.map(x => x.year===year ? 7:4);
+  trendChart.data.datasets[0].pointRadius = pr;
+  trendChart.update();
+
+  document.querySelectorAll('#dataTableBody tr').forEach(tr => {
+    tr.classList.toggle('row-active', parseInt(tr.dataset.year,10) === year);
+  });
+
+  // Bản đồ: gọi API chi tiết theo năm để biết ảnh có sẵn hay chưa
+  const detail = await fetch(API.yearDetail(year)).then(r => r.json());
+  document.getElementById('mapTitle').textContent = `Bản đồ nhiệt độ bề mặt — năm ${year}${detail.heatmap_available ? '' : ' (chưa có ảnh)'}`;
+  if (currentOverlay) { leafletMap.removeLayer(currentOverlay); currentOverlay = null; }
+  const noteEl = document.getElementById('mapNote');
+  if (noteEl) noteEl.remove();
+
+  if (detail.heatmap_available) {
+    const bounds = boundaryLayer.getBounds();
+    currentOverlay = L.imageOverlay(`/static/${detail.heatmap_image}`, bounds, { opacity: 0.85 }).addTo(leafletMap);
+  } else {
+    const note = document.createElement('div');
+    note.id = 'mapNote';
+    note.className = 'map-note';
+    note.style.marginTop = '10px';
+    note.textContent = `Ảnh bản đồ nhiệt năm ${year} chưa được nạp vào hệ thống. Nhiệt độ bề mặt trung bình năm ${year} là ${fmt(r.avg_lst,1)}°C — xem xu hướng ở biểu đồ phía trên.`;
+    document.getElementById('leafletMap').insertAdjacentElement('afterend', note);
+  }
+
+  // UTFVI zones (hiện có dữ liệu thật cho năm 2026)
+  const utfvi = await fetch(API.utfvi(year)).then(r => r.json());
+  const listEl = document.getElementById('utfviList');
+  if (utfvi.length === 0) {
+    listEl.innerHTML = `<div class="map-note">Chưa có dữ liệu phân vùng UTFVI cho năm ${year}. Dữ liệu năm 2026 hiện có sẵn.</div>`;
+  } else {
+    const maxArea = Math.max(...utfvi.map(d => d.area_km2));
+    listEl.innerHTML = utfvi.map(d => `
+      <div class="utfvi-row">
+        <div class="name">${d.class_name}</div>
+        <div class="track"><div class="fill" style="width:${(d.area_km2/maxArea*100).toFixed(1)}%; background:${d.color_hex}"></div></div>
+        <div class="area num">${fmt(d.area_km2,1)} km²</div>
+      </div>`).join('');
+  }
+}
+
+boot();
+</script>
+</body>
+</html>

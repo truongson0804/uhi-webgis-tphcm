@@ -1,0 +1,1272 @@
+{% load static %}
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Bản đồ đảo nhiệt TP.HCM</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Be+Vietnam+Pro:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="{% static 'dashboard/vendor/leaflet.css' %}"/>
+<style>
+  /* ===== Giao diện "Atlas" nền sáng — bố cục: thanh điều khiển 4 bước + bản đồ + cột Đọc nhanh ===== */
+  :root {
+    --bg: #EEF2F6; --paper: #FFFFFF; --panel: #FFFFFF; --panel-solid: #FFFFFF; --panel-2: #EDF1F5;
+    --border: #E1E7EE; --border-strong: #C9D3DE;
+    --text: #182230; --muted: #566375; --dim: #8A96A6;
+    --sky: #0D7A70; --sky-soft: rgba(13,122,112,.09); --cyan: #0D7A70;
+    --warm: #C2560C; --hot: #C0262D; --cool: #0E7490;
+    --ink: #13253A; --radius: 16px;
+    --shadow: 0 1px 2px rgba(16,24,40,.04), 0 6px 18px -8px rgba(16,24,40,.12);
+    --shadow-hover: 0 2px 4px rgba(16,24,40,.05), 0 16px 32px -12px rgba(16,24,40,.22);
+    --heat: linear-gradient(90deg,#FDE68A,#F59E0B,#EA580C,#B91C1C);
+  }
+  * { box-sizing: border-box; }
+  html, body { margin:0; }
+  body { background:
+      radial-gradient(1100px 520px at 8% -8%, rgba(13,122,112,.10), transparent 60%),
+      radial-gradient(900px 480px at 100% 0%, rgba(234,88,12,.08), transparent 55%),
+      var(--bg);
+    background-attachment: fixed; color:var(--text); font-family:'Be Vietnam Pro',system-ui,sans-serif; -webkit-font-smoothing:antialiased; }
+  .num { font-family:'IBM Plex Mono',monospace; font-variant-numeric: tabular-nums; }
+  a { color:var(--sky); }
+  code { font-family:'IBM Plex Mono',monospace; font-size:.92em; background:var(--panel-2); padding:1px 5px; border-radius:4px; }
+
+  /* ---- Thanh trên cùng ---- */
+  .topbar { position:sticky; top:0; z-index:1200; display:flex; align-items:center; gap:22px; padding:10px 32px; background:rgba(19,37,58,.96); backdrop-filter:blur(10px); color:#EEF2F6; flex-wrap:wrap; box-shadow:0 4px 18px -8px rgba(0,0,0,.35); }
+  .topbar::after { content:''; position:absolute; left:0; right:0; bottom:0; height:3px; background:var(--heat); }
+  .topbar .back { color:#C9D3CE; text-decoration:none; font-size:12.5px; white-space:nowrap; }
+  .topbar .back:hover { color:#fff; }
+  .brand { display:flex; align-items:center; gap:10px; }
+  .brand .logo { width:30px; height:30px; border-radius:50%; background:conic-gradient(#0E7490 0 25%, #FDE68A 0 50%, #F97316 0 75%, #B91C1C 0); box-shadow:0 0 0 3px rgba(255,255,255,.12); }
+  .brand b { display:block; font-size:15px; letter-spacing:.01em; }
+  .brand small { color:#AEBBB5; font-size:11.5px; }
+  .tabs { display:flex; gap:2px; margin-left:auto; flex-wrap:wrap; }
+  .tab { font-family:inherit; font-size:13px; padding:8px 14px; border:none; background:none; color:#C9D3CE; cursor:pointer; border-radius:999px; }
+  .tab:hover { color:#fff; background:rgba(255,255,255,.07); }
+  .tab { transition:background .2s, color .2s; }
+  .tab.active { background:#fff; color:var(--ink); font-weight:600; box-shadow:0 2px 8px rgba(0,0,0,.2); }
+  .btn { font-family:inherit; font-size:12.5px; padding:8px 16px; border-radius:999px; border:1px solid rgba(255,255,255,.35); background:transparent; color:#F3EFE6; cursor:pointer; white-space:nowrap; }
+  .btn { transition:all .2s; }
+  .btn:hover { background:#fff; color:var(--ink); }
+
+  .wrap { max-width:1520px; margin:0 auto; padding:24px 32px 80px; }
+
+  /* ---- Thanh điều khiển 4 bước ---- */
+  .controls { display:grid; grid-template-columns:minmax(480px,2.3fr) minmax(190px,1fr) minmax(390px,1.9fr) auto; gap:0; background:var(--paper); border:1px solid var(--border); border-radius:var(--radius); box-shadow:var(--shadow); }
+  .step { padding:14px 16px; border-right:1px dashed var(--border); min-width:0; }
+  .step:last-child { border-right:none; }
+  .step .lbl { font-size:11.5px; color:var(--muted); margin-bottom:8px; display:flex; align-items:center; gap:8px; }
+  .step .lbl i { font-style:normal; width:20px; height:20px; border-radius:50%; background:linear-gradient(135deg,#0D7A70,#13253A); color:#fff; font-size:11px; display:inline-flex; align-items:center; justify-content:center; font-weight:700; }
+  .layer-btns { display:grid; grid-template-columns:repeat(5,1fr); gap:6px; }
+  .layer-btns button { font-family:inherit; text-align:left; padding:8px 10px; border-radius:11px; border:1px solid var(--border); background:var(--panel); color:var(--text); cursor:pointer; line-height:1.25; position:relative; transition:transform .15s, box-shadow .2s, border-color .2s; }
+  .layer-btns button::before { content:''; display:block; height:4px; border-radius:3px; margin-bottom:6px; background:var(--sw, #ccc); }
+  .layer-btns button[data-l=lst] { --sw: linear-gradient(90deg,#FFF7BC,#FE9929,#8C2D04); }
+  .layer-btns button[data-l=utfvi] { --sw: linear-gradient(90deg,#0E9488 0 30%,#EAB308 30% 55%,#C2410C 55% 80%,#9F1C2E 80%); }
+  .layer-btns button[data-l=ndvi] { --sw: linear-gradient(90deg,#8C510A,#DFC27D,#7FBC41,#1B5E20); }
+  .layer-btns button[data-l=ndbi] { --sw: linear-gradient(90deg,#2166AC,#F7F7F7,#EF8A62,#B2182B); }
+  .layer-btns button[data-l=ndwi] { --sw: linear-gradient(90deg,#A6611A,#F5F5F5,#80CDC1,#01665E); }
+  .layer-btns button:hover { transform:translateY(-2px); box-shadow:var(--shadow); }
+  .layer-btns button b { display:block; font-size:12.5px; }
+  .layer-btns button small { display:block; font-size:10.5px; color:var(--dim); margin-top:2px; }
+  .layer-btns button:hover { border-color:var(--border-strong); }
+  .layer-btns button.active { border-color:var(--sky); background:var(--sky-soft); box-shadow:inset 0 0 0 1px var(--sky); }
+  .layer-btns button.active b { color:var(--sky); }
+  select.f-select { width:100%; background:var(--panel); color:var(--text); border:1px solid var(--border); border-radius:9px; padding:9px 11px; font-family:inherit; font-size:13px; outline:none; cursor:pointer; }
+  select.f-select:focus { border-color:var(--sky); }
+  .year-chips { display:flex; flex-wrap:wrap; gap:5px; }
+  .year-chips button { font-family:"IBM Plex Mono",monospace; font-size:12px; padding:7px 7px; border-radius:8px; border:1px solid var(--border); background:var(--panel); color:var(--muted); cursor:pointer; }
+  .year-chips button:hover { color:var(--text); border-color:var(--border-strong); }
+  .year-chips button { transition:all .15s; }
+  .year-chips button:hover { transform:translateY(-1px); }
+  .year-chips button.active { background:var(--ink); color:#fff; border-color:var(--ink); box-shadow:0 4px 10px -4px rgba(19,37,58,.6); }
+  .play-btn { font-family:inherit; font-size:12px; font-weight:600; padding:7px 12px; border-radius:8px; border:1px solid var(--sky); background:var(--sky-soft); color:var(--sky); cursor:pointer; transition:all .15s; white-space:nowrap; }
+  .play-btn:hover { background:var(--sky); color:#fff; }
+  .play-btn.on { background:var(--warm); border-color:var(--warm); color:#fff; }
+  .year-track { height:3px; border-radius:2px; background:var(--panel-2); margin-top:8px; overflow:hidden; }
+  .year-track > div { height:100%; width:0; background:var(--heat); transition:width .4s ease; }
+  .step small.sub { display:block; font-size:10.5px; color:var(--dim); margin-top:6px; }
+  .hidden-ctrl { display:none; }
+  details.opts { position:relative; }
+  details.opts summary { list-style:none; cursor:pointer; font-size:13px; padding:9px 14px; border-radius:9px; border:1px solid var(--border); background:var(--panel); white-space:nowrap; }
+  details.opts summary::-webkit-details-marker { display:none; }
+  details.opts[open] summary { border-color:var(--sky); color:var(--sky); }
+  .opts-panel { position:absolute; right:0; top:calc(100% + 8px); z-index:1100; width:330px; background:var(--panel); border:1px solid var(--border-strong); border-radius:12px; padding:12px 14px; box-shadow:0 12px 30px -10px rgba(0,0,0,.25); }
+  .opts-panel .f-label { font-size:11.5px; color:var(--muted); margin:12px 0 6px; }
+  .opts-panel .f-label:first-child { margin-top:0; }
+  .f-radio, .f-check { display:flex; align-items:flex-start; gap:9px; font-size:12.5px; color:var(--text); padding:5px 4px; cursor:pointer; line-height:1.4; }
+  .f-radio input, .f-check input { accent-color: var(--sky); margin:2px 0 0; }
+  .f-radio small, .f-check small { display:block; color:var(--dim); font-size:11px; }
+  .seg { display:flex; gap:6px; }
+  .seg button { flex:1; font-size:12px; font-family:inherit; padding:7px 4px; border-radius:8px; border:1px solid var(--border); background:var(--panel); color:var(--muted); cursor:pointer; }
+  .seg button.active { background:var(--ink); border-color:var(--ink); color:#fff; }
+
+  /* ---- Tiêu đề ---- */
+  .title-row { display:flex; justify-content:space-between; align-items:flex-end; gap:16px; flex-wrap:wrap; margin:24px 0 14px; }
+  h1 { font-size:26px; margin:0; letter-spacing:-.01em; font-weight:700; }
+  h1 .acc { color:var(--sky); }
+  .subtitle { font-size:12.5px; color:var(--muted); margin-top:4px; }
+  .chips { display:flex; gap:6px; flex-wrap:wrap; }
+  .chip { font-size:11.5px; padding:5px 10px; border-radius:999px; border:1px solid var(--border); background:var(--panel); color:var(--text); }
+  .chip b { font-family:'IBM Plex Mono',monospace; font-weight:500; }
+  .chip.warm { border-color:#F3C9A2; background:#FFF4EA; color:#9A3412; }
+  .chip.cool { border-color:#B7E1DD; background:#ECF8F6; color:#115E59; }
+
+  .pane { display:none; }
+  .pane.active { display:block; }
+  .sec-row { display:flex; justify-content:space-between; align-items:baseline; gap:12px; margin:0 0 10px; flex-wrap:wrap; }
+  .sec-row h4 { margin:0; font-size:15px; font-weight:700; }
+  .sec-row > span { font-size:11.5px; color:var(--dim); }
+
+  /* ---- Bản đồ + cột Đọc nhanh ---- */
+  .map-layout { display:grid; grid-template-columns:minmax(0,1fr) 360px; gap:16px; }
+  .map-box { position:relative; border-radius:var(--radius); overflow:hidden; border:1px solid var(--border); background:var(--panel-2); box-shadow:var(--shadow); }
+  #map { height:clamp(560px, calc(100vh - 300px), 760px); background:#E8ECEF; }
+  .map-box::after { content:''; position:absolute; left:0; top:0; height:3px; width:0; z-index:1002; background:var(--heat); opacity:0; transition:width .6s ease, opacity .3s; }
+  .map-box.busy::after { width:85%; opacity:1; }
+  .leaflet-overlay-pane canvas { transition:opacity .35s ease; }
+  .map-box.busy .leaflet-overlay-pane canvas { opacity:.45; }
+  .area-tip { position:absolute; top:10px; right:12px; z-index:1000; background:rgba(19,37,58,.88); color:#fff; font-size:12px; font-weight:600; padding:6px 11px; border-radius:999px; pointer-events:none; opacity:0; transform:translateY(-4px); transition:opacity .2s, transform .2s; }
+  .area-tip.show { opacity:1; transform:none; }
+  .goto { position:absolute; top:54px; left:52px; z-index:1000; font-size:11.5px; font-weight:600; padding:6px 10px; border-radius:8px; border:1px solid var(--border-strong); background:rgba(255,253,248,.95); color:var(--text); cursor:pointer; font-family:inherit; }
+  .goto:hover { color:var(--sky); border-color:var(--sky); }
+  .map-search { position:absolute; top:10px; left:52px; z-index:1000; display:flex; align-items:center; gap:7px; width:300px; background:rgba(255,253,248,.96); border:1px solid var(--border-strong); border-radius:9px; padding:0 10px; box-shadow:0 2px 8px rgba(0,0,0,.08); }
+  .map-search:focus-within { border-color:var(--sky); }
+  .map-search.err { border-color:var(--hot); }
+  .map-search span { color:var(--muted); }
+  .map-search input { flex:1; min-width:0; background:none; border:none; outline:none; color:var(--text); font-family:'IBM Plex Mono',monospace; font-size:12px; padding:8px 0; }
+  .hover-box { position:absolute; bottom:12px; left:12px; z-index:1000; background:rgba(255,253,248,.96); border:1px solid var(--border-strong); border-radius:9px; padding:8px 11px; font-size:11.5px; pointer-events:none; display:none; line-height:1.55; min-width:210px; box-shadow:0 2px 8px rgba(0,0,0,.08); }
+  .hover-box b { font-family:'IBM Plex Mono',monospace; font-weight:500; }
+  .map-empty { position:absolute; inset:0; z-index:1001; display:none; align-items:center; justify-content:center; text-align:center; padding:30px; background:rgba(243,239,230,.9); color:var(--muted); font-size:13.5px; line-height:1.6; }
+  .pick-marker { width:16px; height:16px; border-radius:50%; border:2px solid var(--ink); box-shadow:0 0 0 4px rgba(34,48,43,.18); background:rgba(255,255,255,.6); }
+  .leaflet-control-scale-line { background:rgba(255,253,248,.85); color:var(--muted); border-color:var(--muted); font-family:'IBM Plex Mono',monospace; font-size:10px; }
+  .leaflet-popup-content-wrapper, .leaflet-popup-tip { background:var(--panel); color:var(--text); border:1px solid var(--border-strong); }
+  .leaflet-popup-content { font-size:12px; line-height:1.6; margin:11px 13px; font-family:'Be Vietnam Pro',sans-serif; }
+  .leaflet-popup-content b { font-family:'IBM Plex Mono',monospace; font-weight:500; }
+  .leaflet-popup-content .pt { font-weight:700; color:var(--sky); font-size:13px; }
+  .pp-sample { margin-top:8px; padding-top:8px; border-top:1px solid var(--border); font-size:11.5px; }
+  .pp-sample .h { font-size:10.5px; color:var(--muted); text-transform:uppercase; letter-spacing:.05em; margin-bottom:3px; }
+
+  .readout { background:var(--paper); border:1px solid var(--border); border-radius:var(--radius); padding:18px; display:flex; flex-direction:column; gap:16px; max-height:clamp(562px, calc(100vh - 298px), 762px); overflow-y:auto; box-shadow:var(--shadow); scrollbar-width:thin; }
+  .readout > div { animation:fadeUp .35s ease both; }
+  @keyframes fadeUp { from { opacity:0; transform:translateY(6px); } to { opacity:1; transform:none; } }
+  .readout h5 { margin:0 0 6px; font-size:11px; letter-spacing:.08em; text-transform:uppercase; color:var(--dim); font-weight:600; }
+  .quick h3 { margin:0 0 6px; font-size:14px; line-height:1.4; }
+  .quick p { margin:0; font-size:12.5px; color:var(--muted); line-height:1.6; }
+  .quick .tags { display:flex; gap:5px; flex-wrap:wrap; margin-top:8px; }
+  .quick .tags span { font-size:10.5px; padding:2px 8px; border-radius:999px; background:var(--panel-2); color:var(--muted); }
+  .legend .t { font-size:12.5px; font-weight:600; }
+  .legend .s { display:flex; justify-content:space-between; align-items:center; font-size:11px; color:var(--muted); margin:3px 0 8px; gap:8px; }
+  .legend .s .badge { font-size:10px; padding:2px 7px; border-radius:999px; background:var(--sky-soft); color:var(--sky); white-space:nowrap; }
+  .legend .ticks { display:flex; justify-content:space-between; font-size:10.5px; font-family:'IBM Plex Mono',monospace; margin-bottom:4px; }
+  .legend .bar { height:12px; border-radius:3px; border:1px solid rgba(0,0,0,.08); }
+  .legend .ends { display:flex; justify-content:space-between; font-size:10.5px; color:var(--muted); margin-top:5px; }
+  .legend .cats { display:grid; grid-template-columns:1fr 1fr; gap:5px 10px; font-size:11.5px; }
+  .legend .cats i { display:inline-block; width:11px; height:11px; border-radius:2px; margin-right:6px; vertical-align:-1px; }
+  .legend .note { font-size:10.5px; color:var(--dim); margin-top:6px; line-height:1.45; }
+  .meaning { font-size:12.5px; color:var(--text); line-height:1.6; background:linear-gradient(135deg,#F0F7F6,#F6F8FB); border:1px solid #DCEBE8; border-radius:12px; padding:11px 13px; }
+  .howto { margin:0; padding-left:18px; font-size:12px; color:var(--muted); line-height:1.7; }
+
+  /* ---- Ô số liệu ---- */
+  .kpis { display:grid; grid-template-columns:repeat(4,1fr); gap:12px; margin-top:16px; }
+  .kpi { background:var(--panel); border:1px solid var(--border); border-radius:var(--radius); padding:16px 18px; position:relative; overflow:hidden; box-shadow:var(--shadow); transition:transform .2s, box-shadow .2s; }
+  .kpi::before { content:''; position:absolute; left:0; top:0; right:0; height:3px; background:linear-gradient(90deg,#0D7A70,#13253A); }
+  .kpi:hover { transform:translateY(-3px); box-shadow:var(--shadow-hover); }
+  .spark { display:block; width:100%; height:38px; margin-top:8px; overflow:visible; }
+  .kpi .k { font-size:12px; color:var(--muted); font-weight:500; }
+  .kpi .v { font-size:26px; font-weight:700; margin-top:6px; color:var(--ink); font-family:'IBM Plex Mono',monospace; }
+  .kpi .v small { font-size:14px; font-weight:500; }
+  .kpi .d { font-size:11.5px; color:var(--dim); margin-top:6px; line-height:1.5; }
+  .kpi .mean { font-size:11.5px; color:var(--sky); margin-top:8px; padding-top:8px; border-top:1px dashed var(--border); line-height:1.5; }
+  .kpi .d .up { color:var(--hot); } .kpi .d .down { color:var(--cool); }
+  .pill { display:inline-block; padding:2px 8px; border-radius:999px; background:var(--panel-2); }
+  .kpi button.link { background:none; border:none; padding:0; color:var(--sky); cursor:pointer; font-family:inherit; font-size:11.5px; font-weight:600; }
+  .warn-txt { color:var(--warm); }
+  .tag-ok { color:#0F766E; } .tag-mid { color:#B45309; } .tag-low { color:#B91C1C; }
+
+  .samples { margin-top:28px; }
+  .samples .kpis { margin-top:0; }
+  #fcScopeNote:not(:empty) { margin:0 0 12px; }
+  .sample-note:not(:empty) { margin-top:10px; font-size:12.5px; color:#7C2D12; background:#FFF6EC; border:1px solid #F3C9A2; border-radius:9px; padding:9px 12px; line-height:1.6; }
+  .samples .kpi::before { background:var(--heat); }
+  .explain:empty { display:none !important; }
+  .explain { font-size:12.5px; color:var(--muted); line-height:1.65; background:var(--paper); border:1px solid var(--border); border-left:4px solid var(--sky); border-radius:12px; padding:12px 16px; margin-bottom:12px; box-shadow:var(--shadow); }
+  .explain b { color:var(--text); font-weight:600; }
+  .explain.why { margin:12px 0 0; border-left-color:#B45309; }
+  .explain.why summary { cursor:pointer; color:#9A3412; font-weight:600; }
+  .explain.why ul { margin:8px 0 0; padding-left:20px; }
+  .explain.why li { margin-bottom:5px; }
+
+  .rank { margin-top:28px; }
+  .rank-tools { display:flex; gap:6px; }
+  .rank-tools button { font-size:11.5px; padding:5px 11px; border-radius:999px; border:1px solid var(--border); background:var(--panel); color:var(--muted); cursor:pointer; font-family:inherit; }
+  .rank-tools button.active { background:var(--ink); border-color:var(--ink); color:#fff; }
+  .rank-list { background:var(--panel); border:1px solid var(--border); border-radius:var(--radius); padding:6px 14px; max-height:440px; overflow-y:auto; box-shadow:var(--shadow); }
+  .rank-row { transition:background .15s, padding-left .15s; }
+  .rank-row:hover { padding-left:10px; }
+  .rank-row .b > div { transition:width .5s ease; }
+  .rank-row { display:grid; grid-template-columns:26px 1.3fr 2fr 76px; gap:12px; align-items:center; padding:8px 4px; border-bottom:1px solid var(--border); cursor:pointer; font-size:12.5px; }
+  .rank-row:last-child { border-bottom:none; }
+  .rank-row:hover { background:#F4F8FB; }
+  .rank-row.sel { background:var(--sky-soft); }
+  .rank-row .i { color:var(--dim); font-family:'IBM Plex Mono',monospace; font-size:11px; }
+  .rank-row .n small { display:block; font-size:10.5px; color:var(--dim); }
+  .rank-row .b { height:9px; border-radius:2px; background:var(--panel-2); overflow:hidden; }
+  .rank-row .b > div { height:100%; }
+  .rank-row .v { text-align:right; font-family:'IBM Plex Mono',monospace; font-size:12px; }
+  .foot-note { font-size:11.5px; color:var(--dim); margin-top:10px; line-height:1.6; }
+
+  .panel { background:var(--panel); border:1px solid var(--border); border-radius:var(--radius); padding:18px; box-shadow:var(--shadow); }
+  .chart-wrap { position:relative; height:340px; }
+  .grid-2 { display:grid; grid-template-columns:1fr 1fr; gap:12px; }
+  table.t { width:100%; border-collapse:collapse; font-size:12.5px; margin-top:14px; }
+  table.t th, table.t td { padding:9px 8px; border-bottom:1px solid var(--border); text-align:right; font-family:'IBM Plex Mono',monospace; }
+  table.t th:first-child, table.t td:first-child { text-align:left; }
+  table.t th { color:var(--muted); font-weight:600; font-family:'Be Vietnam Pro',sans-serif; font-size:11px; text-transform:uppercase; letter-spacing:.04em; }
+  .note { font-size:12.5px; color:var(--muted); line-height:1.65; }
+  .warnbox { margin-top:14px; padding:12px 14px; border-radius:10px; border:1px solid #F3C9A2; background:#FFF6EC; font-size:12.5px; color:#7C2D12; line-height:1.6; }
+  .about h4 { font-size:15px; margin:22px 0 8px; }
+  .about h4:first-child { margin-top:0; }
+  .about ul { margin:0; padding-left:20px; }
+  .about li { font-size:13px; color:var(--muted); line-height:1.7; margin-bottom:4px; }
+  .about li b { color:var(--text); font-weight:600; }
+  .src-foot { margin-top:34px; font-size:11.5px; color:var(--dim); line-height:1.6; border-top:1px solid var(--border); padding-top:14px; }
+
+  @media (max-width:1100px) {
+    .controls { grid-template-columns:1fr 1fr; }
+    .step:nth-child(2) { border-right:none; }
+    .step:nth-child(-n+2) { border-bottom:1px dashed var(--border); }
+    .map-layout { grid-template-columns:1fr; }
+    .readout { max-height:none; }
+    .kpis { grid-template-columns:repeat(2,1fr); }
+  }
+  @media (max-width:640px) {
+    .topbar { padding:10px 16px; } .tabs { margin-left:0; }
+    .wrap { padding:16px 16px 60px; }
+    .controls { grid-template-columns:1fr; } .step { border-right:none; border-bottom:1px dashed var(--border); }
+    .layer-btns { grid-template-columns:repeat(2,1fr); }
+    .kpis, .grid-2 { grid-template-columns:1fr; }
+    #map { height:440px; }
+    .map-search { width:auto; right:10px; }
+    .rank-row { grid-template-columns:22px 1fr 64px; } .rank-row .b { display:none; }
+    .opts-panel { right:auto; left:0; width:min(330px, calc(100vw - 32px)); }
+  }
+</style>
+</head>
+<body>
+
+<header class="topbar">
+  <a class="back" href="{% url 'dashboard' %}">← Trang tổng quan</a>
+  <div class="brand"><span class="logo"></span><div><b>Atlas nhiệt đô thị</b><small>TP.HCM · Bình Dương · Bà Rịa - Vũng Tàu (ranh giới cũ) · 2020–2026</small></div></div>
+  <nav class="tabs" id="tabs">
+    <button type="button" class="tab active" data-pane="pMap">Bản đồ</button>
+    <button type="button" class="tab" data-pane="pHistory">Diễn biến theo năm</button>
+    <button type="button" class="tab" data-pane="pForecast">Dự báo</button>
+    <button type="button" class="tab" data-pane="pBacktest">Kiểm tra dự báo</button>
+    <button type="button" class="tab" data-pane="pAbout">Cách đọc &amp; hạn chế</button>
+  </nav>
+  <button type="button" class="btn" id="btnExport">↓ Tải số liệu (CSV)</button>
+</header>
+
+<div class="wrap">
+  <section class="controls" aria-label="Bộ lọc bản đồ">
+    <div class="step">
+      <div class="lbl"><i>1</i> Bạn muốn xem chỉ số gì?</div>
+      <div class="layer-btns" id="layerBtns">
+        <button type="button" data-l="lst" class="active"><b>Nhiệt độ</b><small>bề mặt (LST)</small></button>
+        <button type="button" data-l="utfvi"><b>Đảo nhiệt</b><small>mức độ (UTFVI)</small></button>
+        <button type="button" data-l="ndvi"><b>Cây xanh</b><small>NDVI</small></button>
+        <button type="button" data-l="ndbi"><b>Bê tông</b><small>NDBI</small></button>
+        <button type="button" data-l="ndwi"><b>Độ ẩm</b><small>nước (NDWI)</small></button>
+      </div>
+      <select class="hidden-ctrl" id="fLayer">
+        <option value="lst">Nhiệt độ bề mặt (LST)</option>
+        <option value="utfvi">Cường độ đảo nhiệt (UTFVI)</option>
+        <option value="ndvi">Chỉ số thực vật (NDVI)</option>
+        <option value="ndbi">Chỉ số xây dựng (NDBI)</option>
+        <option value="ndwi">Chỉ số nước (NDWI)</option>
+      </select>
+    </div>
+    <div class="step">
+      <div class="lbl"><i>2</i> Ở khu vực nào?</div>
+      <select class="f-select" id="fArea"><option value="all">Toàn vùng (3 tỉnh cũ)</option></select>
+      <small class="sub">Hoặc bấm tên quận/huyện trong bảng xếp hạng bên dưới</small>
+    </div>
+    <div class="step">
+      <div class="lbl"><i>3</i> Năm nào? <span class="num" id="fYearVal" style="margin-left:auto;color:var(--text)">2026</span></div>
+      <div class="year-chips" id="yearChips"></div>
+      <div class="year-track"><div id="yearTrack"></div></div>
+      <div style="display:flex;align-items:center;gap:10px;margin-top:8px">
+        <button type="button" class="play-btn" id="btnPlay" title="Tự động chuyển lần lượt từng năm 2020 → 2026">▶ Xem diễn biến</button>
+        <small class="sub" style="margin:0">Mỗi năm là ảnh ghép mùa khô (tháng 1–3)</small>
+      </div>
+      <input type="range" class="hidden-ctrl" id="fYear" min="2020" max="2026" step="1" value="2026">
+      <div class="hidden-ctrl" id="fYearTicks"></div>
+    </div>
+    <div class="step">
+      <div class="lbl"><i>4</i> Tuỳ chọn</div>
+      <details class="opts">
+        <summary>⚙ Hiển thị</summary>
+        <div class="opts-panel">
+          <div class="f-label">Lọc dữ liệu</div>
+          <label class="f-check"><input type="checkbox" id="fCoverage">
+            <span>Ẩn ô bị mây che nhiều<small>Chỉ hiện ô 1 km có ảnh vệ tinh rõ ≥ 50% diện tích</small></span></label>
+          <label class="f-check"><input type="checkbox" id="fPoints">
+            <span>Hiện các điểm đo mẫu<small>~1.900 chấm/năm, mỗi chấm là 1 ô ảnh 100 m · viền cam = chỉ 1–2 ảnh, kém tin cậy</small></span></label>
+          <div class="f-label">Cách tô màu</div>
+          <label class="f-radio"><input type="radio" name="fScale" value="auto" checked><span>Theo năm đang xem<small>Thấy rõ chỗ nóng / mát trong năm đó</small></span></label>
+          <label class="f-radio"><input type="radio" name="fScale" value="fixed"><span>Giống nhau cho mọi năm<small>Dùng khi muốn so sánh màu giữa các năm</small></span></label>
+          <div class="f-label">Nền bản đồ</div>
+          <div class="seg" id="fBasemap">
+            <button type="button" class="active" data-b="light">Sáng</button>
+            <button type="button" data-b="dark">Tối</button>
+            <button type="button" data-b="sat">Vệ tinh</button>
+            <button type="button" data-b="none">Ẩn</button>
+          </div>
+        </div>
+      </details>
+    </div>
+  </section>
+
+  <div class="title-row">
+    <div>
+      <h1 id="title">Nhiệt độ bề mặt <span class="acc">(LST)</span></h1>
+      <div class="subtitle" id="subtitle">—</div>
+    </div>
+    <div class="chips" id="chips"></div>
+  </div>
+
+    <!-- ===== Bản đồ ===== -->
+    <section class="pane active" id="pMap">
+      <div class="map-layout">
+        <div class="map-box">
+          <div id="map"></div>
+          <form class="map-search" id="mapSearch" autocomplete="off"><span>⌕</span><input id="mapSearchInput" placeholder="Nhập tọa độ, vd: 10.776, 106.700"></form>
+          <button type="button" class="goto" id="btnGoto">⌖ Về khu vực đang chọn</button>
+          <div class="hover-box" id="hoverBox"></div>
+          <div class="area-tip" id="areaTip"></div>
+          <div class="map-empty" id="mapEmpty"></div>
+        </div>
+        <aside class="readout">
+          <div class="quick">
+            <h5>Đọc nhanh</h5>
+            <h3 id="bannerTitle">—</h3>
+            <p id="bannerText"></p>
+            <div class="tags" id="bannerTags"></div>
+          </div>
+          <div>
+            <h5>Chú giải màu</h5>
+            <div class="legend" id="legend"></div>
+          </div>
+          <div>
+            <h5>Chỉ số này nghĩa là gì?</h5>
+            <div class="meaning" id="layerHelp"></div>
+          </div>
+          <div>
+            <h5>Cách dùng bản đồ</h5>
+            <ul class="howto">
+              <li><b>Rê chuột</b> lên bản đồ: xem nhanh số liệu ô 1 km.</li>
+              <li><b>Bấm</b> một chỗ: xem chi tiết + điểm đo mẫu gần nhất.</li>
+              <li>Mỗi <b>ô vuông</b> = 1 km × 1 km, là trung bình các điểm ảnh 30 m bên trong.</li>
+            </ul>
+          </div>
+        </aside>
+      </div>
+
+      <div class="kpis">
+        <div class="kpi"><div class="k" id="k1k">Trung bình</div><div class="v num" id="k1v">—</div><div class="d" id="k1d"></div><svg class="spark" id="k1spark" viewBox="0 0 200 38" preserveAspectRatio="none"></svg>
+          <div class="mean">Nghĩa là: mức chung của cả khu vực, tính trên toàn bộ ảnh vệ tinh.</div></div>
+        <div class="kpi"><div class="k" id="k2k">Khoảng giá trị phổ biến</div><div class="v num" id="k2v">—</div><div class="d" id="k2d"></div>
+          <div class="mean">Nghĩa là: 9 trên 10 ô 1 km nằm trong khoảng này — không tính vài ô quá nóng/quá mát.</div></div>
+        <div class="kpi"><div class="k" id="k3k">—</div><div class="v num" id="k3v">—</div><div class="d" id="k3d"></div>
+          <div class="mean" id="k3m">Nghĩa là: phần diện tích nóng hơn hẳn mặt bằng chung của vùng.</div></div>
+        <div class="kpi"><div class="k">Độ phủ dữ liệu</div><div class="v num" id="k4v">—</div><div class="d" id="k4d"></div>
+          <div class="mean">Nghĩa là: số ô 1 km đang hiển thị trên bản đồ của khu vực.</div></div>
+      </div>
+
+      <div class="samples">
+        <div class="sec-row"><h4>Điểm đo mẫu toàn vùng <span class="num" id="spYear" style="color:var(--muted);font-weight:500"></span></h4><span>notebook mục 9b</span></div>
+        <div class="explain">
+          <b>Điểm đo mẫu là gì?</b> Mỗi năm, Earth Engine chọn ngẫu nhiên khoảng 2.000 vị trí trong vùng nghiên cứu và đọc giá trị của
+          đúng 1 ô ảnh vệ tinh 100 m × 100 m tại đó — giống như đặt ~1.900 “nhiệt kế” rải khắp vùng. Khác với ô lưới 1 km (là trung bình
+          của cả trăm ô ảnh nhỏ), điểm đo mẫu cho thấy giá trị tại từng chỗ cụ thể, nên có thể nóng hơn nhiều. Bộ điểm này cũng dùng để tính hệ số tương quan r.
+        </div>
+        <div class="kpis">
+          <div class="kpi"><div class="k">Điểm đo nóng hơn 40°C</div><div class="v num" id="sp2v">—</div><div class="d" id="sp2d"></div></div>
+          <div class="kpi"><div class="k">5% điểm nóng nhất có nhiệt độ từ</div><div class="v num" id="sp3v">—</div><div class="d" id="sp3d"></div></div>
+          <div class="kpi"><div class="k">Điểm đo cao nhất</div><div class="v num" id="sp1v">—</div><div class="d" id="sp1d"></div></div>
+          <div class="kpi"><div class="k">Độ tin cậy dữ liệu năm này</div><div class="v" id="sp4v">—</div><div class="d" id="sp4d"></div></div>
+        </div>
+        <div class="sample-note" id="spNote"></div>
+        <details class="explain why">
+          <summary>Vì sao có điểm đo nóng bất thường (trên 50–60°C)?</summary>
+          <ul>
+            <li><b>LST là nhiệt độ của bề mặt</b> (mái tôn, mái nhà xưởng, bãi đất trống, mặt đường) lúc vệ tinh bay qua khoảng 10h30 sáng mùa khô — không phải nhiệt độ không khí. Mái kim loại dưới nắng gắt có thể nóng 55–65°C.</li>
+            <li><b>Điểm ở xã Long Sơn (Bà Rịa - Vũng Tàu cũ, 10,459; 107,065)</b> nóng 61–68°C gần như mọi năm, nằm sát tổ hợp công nghiệp ven biển. Vì lặp lại qua nhiều năm với các bộ ảnh khác nhau nên khả năng cao là nguồn nhiệt thật của khu công nghiệp, nhưng chưa kiểm chứng được tại thực địa.</li>
+            <li><b>Điểm chỉ có 1–2 ảnh vệ tinh hợp lệ</b> (các ảnh còn lại bị mây che) dễ bị sai do sót mây hoặc nhiễu — được đánh dấu ⚠ “ít ảnh”.</li>
+            <li>Các điểm này <b>vẫn được giữ trong dữ liệu</b> (không xoá cho đẹp), nhưng không đại diện cho cả vùng: hãy xem “5% điểm nóng nhất” và nhiệt độ trung bình để đánh giá chung.</li>
+          </ul>
+        </details>
+      </div>
+
+      <div class="rank">
+        <div class="sec-row">
+          <h4>Xếp hạng quận/huyện <span id="rankYear" class="num" style="color:var(--muted);font-weight:500"></span></h4>
+          <div class="rank-tools" id="rankSort">
+            <button type="button" class="active" data-s="desc">Cao → thấp</button>
+            <button type="button" data-s="asc">Thấp → cao</button>
+          </div>
+        </div>
+        <div class="rank-list" id="rankList"></div>
+        <div class="foot-note">Giá trị = trung bình toàn bộ pixel 100 m trong quận/huyện (Earth Engine <code>reduceRegions</code>, notebook mục 9d). Bấm một dòng để chọn khu vực. ⚠ Côn Đảo có NDBI cao bất thường mọi năm (0,5–0,7) dù ít nhà cửa — nhiều khả năng do ô ảnh sát biển/đá ven bờ, nên không dùng để đánh giá mức bê tông hoá. Ranh giới theo FAO GAUL 2015 — một số đơn vị đã thay đổi sau đó (vd. Quận 2, Quận 9 và Thủ Đức nay thuộc TP Thủ Đức; Tân Thành nay là TX Phú Mỹ), và cấp quận/huyện đã bãi bỏ từ 01/07/2025.</div>
+      </div>
+    </section>
+
+    <!-- ===== Lịch sử ===== -->
+    <section class="pane" id="pHistory">
+      <div class="sec-row"><h4 id="histTitle">Diễn biến 2020–2026</h4><span id="histSource"></span></div>
+      <div class="explain" id="histNote" style="display:block"></div>
+      <div class="panel"><div class="chart-wrap"><canvas id="histChart"></canvas></div></div>
+      <div class="panel" style="margin-top:12px"><table class="t" id="histTable" style="margin-top:0"></table></div>
+    </section>
+
+    <!-- ===== Dự báo ===== -->
+    <section class="pane" id="pForecast">
+      <div class="sec-row"><h4 id="fcTitle">Dự báo 2027–2030</h4><span>Hồi quy theo năm trên 7 giá trị 2020–2026 (notebook mục 11c)</span></div>
+      <div class="sample-note" id="fcScopeNote"></div>
+      <div class="panel"><div class="chart-wrap"><canvas id="fcChart"></canvas></div></div>
+      <div class="grid-2" style="margin-top:12px" id="fcCards"></div>
+      <div class="warnbox" id="fcWarn">Chuỗi chỉ có 7 điểm dữ liệu nên mô hình đa thức bậc 2 dễ <b>overfitting</b> — nên dùng mô hình tuyến tính làm chính, đa thức chỉ để so sánh. Đây là ngoại suy xu hướng của giá trị trung bình theo năm, <b>không</b> phải dự báo không gian: bản đồ không có lớp dự báo.</div>
+    </section>
+
+    <!-- ===== Kiểm định ===== -->
+    <section class="pane" id="pBacktest">
+      <div class="sec-row"><h4 id="btTitle">Kiểm định ngược năm 2026</h4><span>Notebook mục 11c</span></div>
+      <p class="note">Huấn luyện <b>cùng 2 mô hình</b> của mục Dự báo nhưng chỉ trên dữ liệu 2020–2025, dự báo năm 2026, rồi so với giá trị 2026 quan trắc thật từ Landsat (theo chỉ số và khu vực đang chọn). Sai số cho biết mô hình đáng tin đến đâu khi ngoại suy 1 năm.</p>
+      <div class="grid-2" id="btCards" style="margin-top:14px"></div>
+      <div class="panel" style="margin-top:12px"><div class="chart-wrap" style="height:260px"><canvas id="btChart"></canvas></div></div>
+    </section>
+
+    <!-- ===== Giới thiệu & hạn chế ===== -->
+    <section class="pane about" id="pAbout">
+      <div class="panel">
+        <h4>Dữ liệu và phương pháp</h4>
+        <ul>
+          <li><b>Ảnh vệ tinh:</b> Landsat 8 và 9 Collection 2 Level 2 (USGS), band nhiệt ST_B10 → LST (°C); NDVI, NDBI, NDWI từ các band phản xạ bề mặt.</li>
+          <li><b>Ảnh ghép theo năm:</b> trung vị (median) các ảnh mùa khô tháng 01–03 có mây &lt; 20%, sau khi che mây, viền mây, mây ti và pixel có độ bất định nhiệt &gt; 5 K (QA_PIXEL, ST_QA).</li>
+          <li><b>Vùng nghiên cứu:</b> gộp TP.HCM cũ, Bình Dương cũ và Bà Rịa - Vũng Tàu cũ theo FAO GAUL 2015 cấp 1.</li>
+          <li><b>Lưới 1 km:</b> mỗi ô là trung bình các pixel 30 m hợp lệ bên trong (Earth Engine <code>reduceResolution</code>), không nội suy. <code>coverage</code> = tỉ lệ diện tích ô có dữ liệu.</li>
+          <li><b>UTFVI</b> = (LST − LST trung bình năm) / LST trung bình năm; phân 6 mức theo ngưỡng 0 / 0,005 / 0,010 / 0,015 / 0,020 như notebook mục 8.</li>
+          <li><b>Quận/huyện:</b> trung bình toàn bộ pixel 100 m trong ranh giới FAO GAUL 2015 cấp 2 (<code>reduceRegions</code>).</li>
+        </ul>
+        <h4>Hạn chế</h4>
+        <ul>
+          <li><b>Không có dữ liệu theo tháng:</b> phân tích dùng 1 ảnh ghép mùa khô cho mỗi năm. Mùa mưa nhiều mây nên Landsat rất ít ảnh dùng được.</li>
+          <li><b>LST là nhiệt độ bề mặt</b> (mái nhà, mặt đường, tán cây) lúc vệ tinh bay qua (~10h30 sáng), không phải nhiệt độ không khí.</li>
+          <li><b>Ô ven biển, mây nhiều</b> có thể chỉ có một phần diện tích có dữ liệu — dùng bộ lọc "≥ 50% diện tích" để ẩn.</li>
+          <li><b>Số ảnh hợp lệ mỗi năm khác nhau nhiều:</b> sau che mây, có năm phần lớn pixel chỉ còn 1–2 ảnh Landsat (xem ô "Điểm mẫu chỉ có 1–2 ảnh hợp lệ" ở tab Bản đồ), nên giá trị năm đó kém ổn định hơn — cần thận trọng khi so sánh từng cặp năm.</li>
+          <li><b>Một vài pixel nóng bất thường</b> (61–68°C) lặp lại hằng năm sát tổ hợp công nghiệp Long Sơn và một khu ở Thủ Đức; nhiều giá trị chỉ dựa trên 1–2 ảnh hợp lệ, chưa kiểm chứng được nguyên nhân.</li>
+          <li><b>Ranh giới quận/huyện GAUL 2015 đã cũ</b> so với địa giới hiện hành, và cấp huyện đã bãi bỏ từ 01/07/2025 — chỉ dùng để so sánh không gian.</li>
+          <li><b>Dự báo</b> chỉ là ngoại suy xu hướng từ 7 điểm dữ liệu (R² thấp), không mô hình hoá khí hậu hay quy hoạch.</li>
+        </ul>
+      </div>
+    </section>
+
+  <div class="src-foot">Nguồn: ảnh vệ tinh Landsat 8/9 Collection 2 Level 2 (USGS), xử lý trên Google Earth Engine. Ranh giới quận/huyện: FAO GAUL 2015. Mọi số liệu lấy từ notebook phân tích, lưu trong PostgreSQL/PostGIS.</div>
+</div>
+
+<script src="{% static 'dashboard/vendor/chart.umd.js' %}"></script>
+<script src="{% static 'dashboard/vendor/leaflet.js' %}"></script>
+<script>
+const API = {
+  yearly: '/api/yearly-metrics/',
+  grid: y => `/api/map/grid/?year=${y}`,
+  districts: '/api/map/districts/',
+  dstats: y => `/api/map/district-stats/?year=${y}`,
+  history: s => `/api/map/history/?scope=${encodeURIComponent(s)}`,
+  forecast: '/api/map/forecast/',
+  utfvi: '/api/utfvi-zones/?year=2026',
+  heat: y => `/api/heat-points/?year=${y}`,
+  nearest: (lat, lon, y) => `/api/heat-points/nearest/?lat=${lat}&lon=${lon}&year=${y}`,
+};
+// Pixel có số ảnh hợp lệ (n_obs) từ ngưỡng này trở xuống bị đánh dấu "ít quan trắc"
+const LOW_OBS = 2;
+
+const fmt = (n, d = 1) => (n === null || n === undefined || isNaN(n)) ? '—'
+  : Number(n).toLocaleString('vi-VN', { minimumFractionDigits: d, maximumFractionDigits: d });
+const fmtS = (n, d = 1) => (n > 0 ? '+' : n < 0 ? '−' : '') + fmt(Math.abs(n), d);
+
+const PROVINCE_VI = { 'Ho Chi Minh City': 'TP.HCM cũ', 'Binh Duong': 'Bình Dương cũ', 'Ba Ria-Vung Tau': 'Bà Rịa - Vũng Tàu cũ' };
+const IDX = { lst: 2, ndvi: 3, ndbi: 4, ndwi: 5 };   // vị trí trong mảng cell
+const COV = 6, DID = 7;
+
+// Thang màu: thấp -> cao. Nhãn 2 đầu theo ý nghĩa vật lý của chỉ số.
+const LAYERS = {
+  lst:  { name: 'Nhiệt độ bề mặt', short: 'LST', unit: '°C', dp: 1, ends: ['Thấp (mát mẻ)', 'Cao (nóng gắt)'],
+          colors: ['#FFF7BC', '#FEE391', '#FEC44F', '#FE9929', '#EC7014', '#CC4C02', '#8C2D04'] },
+  ndvi: { name: 'Chỉ số thực vật', short: 'NDVI', unit: '', dp: 2, ends: ['Ít cây xanh', 'Nhiều cây xanh'],
+          colors: ['#8C510A', '#BF812D', '#DFC27D', '#C7E9A0', '#7FBC41', '#4D9221', '#1B5E20'] },
+  ndbi: { name: 'Chỉ số xây dựng', short: 'NDBI', unit: '', dp: 2, ends: ['Ít bê tông', 'Nhiều bê tông'],
+          colors: ['#2166AC', '#4393C3', '#92C5DE', '#F6C564', '#F4A261', '#D6604D', '#B2182B'] },   // bỏ màu trắng ở giữa cho dễ nhìn trên nền sáng
+  ndwi: { name: 'Chỉ số nước', short: 'NDWI', unit: '', dp: 2, ends: ['Khô', 'Ẩm / mặt nước'],
+          colors: ['#A6611A', '#C9A15A', '#D9C98F', '#9FD3C7', '#5AB4A6', '#35978F', '#01665E'] },
+  utfvi: { name: 'Cường độ đảo nhiệt', short: 'UTFVI', unit: '', dp: 3, categorical: true },
+};
+// Ngưỡng UTFVI đúng notebook mục 8; màu lấy từ /api/utfvi-zones/
+const UTFVI_BINS = [0, 0.005, 0.010, 0.015, 0.020];
+let UTFVI_CLASSES = ['Không UHI', 'Yếu', 'Trung bình', 'Mạnh', 'Rất mạnh', 'Nghiêm trọng'];
+let UTFVI_COLORS = ['#0E9488', '#EAB308', '#EA9C08', '#C77B12', '#C2410C', '#9F1C2E'];
+
+// Giải thích từng chỉ số bằng lời thường (cột "Đọc nhanh")
+const LAYER_HELP = {
+  lst: '<b>Nhiệt độ bề mặt</b> là độ nóng của mặt đất, mái nhà, mặt đường… do vệ tinh đo lúc khoảng 10h30 sáng mùa khô. Không phải nhiệt độ không khí — thường cao hơn nhiệt độ không khí vài độ đến hơn chục độ.',
+  utfvi: '<b>Mức độ đảo nhiệt</b> cho biết một nơi nóng hơn mức trung bình của cả vùng bao nhiêu. “Nghiêm trọng” = nóng hơn trung bình trên 2%. Màu xanh = mát hơn trung bình (không có đảo nhiệt).',
+  ndvi: '<b>Chỉ số cây xanh (NDVI)</b> từ −1 đến 1: càng gần 1 càng nhiều cây xanh tươi tốt; quanh 0 là đất trống, bê tông; âm thường là mặt nước.',
+  ndbi: '<b>Chỉ số bê tông hoá (NDBI)</b>: càng cao càng nhiều nhà cửa, mái tôn, đường nhựa. Lớn hơn 0 thường là khu đô thị, khu công nghiệp.',
+  ndwi: '<b>Chỉ số nước / độ ẩm (NDWI)</b>: càng cao càng ẩm hoặc có mặt nước (sông, hồ, ao); thấp là bề mặt khô.',
+};
+
+const state = { layer: 'lst', area: 'all', year: 2026, coverageOnly: false, scale: 'auto', rankSort: 'desc', showPoints: false };
+let heatCache = {}, pointsLayer, pickLayer, utfviHistCache = {};
+let yearly = [], districts = null, districtById = {}, gridCache = {}, statsCache = {}, historyCache = {};
+let map, cellLayer, districtLayer, highlightLayer, baseDark, baseSat, baseLight, labelsLayer, labelsLight, cellIndex = null;
+let histChart = null, fcChart = null, btChart = null;
+let currentCells = [], currentRange = [0, 1];
+
+function hexToRgb(h) { return [1, 3, 5].map(i => parseInt(h.slice(i, i + 2), 16)); }
+function rampColor(colors, t) {
+  t = Math.max(0, Math.min(1, t));
+  const x = t * (colors.length - 1), i = Math.min(colors.length - 2, Math.floor(x)), f = x - i;
+  const a = hexToRgb(colors[i]), b = hexToRgb(colors[i + 1]);
+  return `rgb(${a.map((v, k) => Math.round(v + (b[k] - v) * f)).join(',')})`;
+}
+function utfviClass(u) { let k = 0; while (k < UTFVI_BINS.length && u >= UTFVI_BINS[k]) k++; return k; }
+function percentile(sorted, q) { return sorted.length ? sorted[Math.min(sorted.length - 1, Math.round(q * (sorted.length - 1)))] : null; }
+
+function cellValue(c, layer, lstMean) {
+  if (layer === 'utfvi') return c[IDX.lst] === null || !lstMean ? null : (c[IDX.lst] - lstMean) / lstMean;
+  return c[IDX[layer]];
+}
+function areaLabel(area) {
+  if (area === 'all') return 'Toàn vùng';
+  if (area.startsWith('province:')) return PROVINCE_VI[area.slice(9)] || area.slice(9);
+  const d = districtById[area.slice(9)];
+  return d ? d.name_vi : area;
+}
+function inArea(c, area) {
+  if (area === 'all') return true;
+  const d = c[DID] ? districtById[c[DID]] : null;
+  if (area.startsWith('province:')) return !!d && d.province === area.slice(9);
+  return String(c[DID]) === area.slice(9);
+}
+
+async function getJSON(url) { const r = await fetch(url); if (!r.ok) throw new Error(url); return r.json(); }
+async function getGrid(y) { return gridCache[y] || (gridCache[y] = await getJSON(API.grid(y))); }
+async function getStats(y) { return statsCache[y] || (statsCache[y] = await getJSON(API.dstats(y))); }
+async function getHeat(y) { return heatCache[y] || (heatCache[y] = await getJSON(API.heat(y))); }
+async function getHistory(s) { return historyCache[s] || (historyCache[s] = await getJSON(API.history(s))); }
+
+// ---------------- Khởi động ----------------
+async function boot() {
+  const [y, d, uz] = await Promise.all([getJSON(API.yearly), getJSON(API.districts), getJSON(API.utfvi)]);
+  yearly = y; districts = d;
+  const uzc = uz.filter(z => z.class_name !== 'Không có dữ liệu');
+  if (uzc.length === 6) { UTFVI_CLASSES = uzc.map(z => z.class_name); UTFVI_COLORS = uzc.map(z => z.color_hex); }
+  d.features.forEach(f => { districtById[f.properties.id] = f.properties; });
+
+  const years = yearly.map(r => r.year);
+  const yr = document.getElementById('fYear');
+  yr.min = years[0]; yr.max = years[years.length - 1]; yr.value = state.year = years[years.length - 1];
+  document.getElementById('fYearTicks').innerHTML = years.map(v => `<span>${String(v).slice(2)}</span>`).join('');
+
+  // Khu vực: toàn vùng -> tỉnh cũ -> quận/huyện
+  const sel = document.getElementById('fArea');
+  const provs = [...new Set(d.features.map(f => f.properties.province))];
+  provs.forEach(p => {
+    const og = document.createElement('optgroup');
+    og.label = PROVINCE_VI[p] || p;
+    og.innerHTML = `<option value="province:${p}">Toàn ${PROVINCE_VI[p] || p}</option>` +
+      d.features.filter(f => f.properties.province === p)
+        .sort((a, b) => a.properties.name_vi.localeCompare(b.properties.name_vi, 'vi', { numeric: true }))
+        .map(f => `<option value="district:${f.properties.id}">${f.properties.name_vi}</option>`).join('');
+    sel.appendChild(og);
+  });
+
+  buildMap();
+  bindControls();
+  await render();
+}
+
+function buildMap() {
+  map = L.map('map', { zoomControl: true, preferCanvas: true, scrollWheelZoom: true }).setView([10.75, 106.8], 9);
+  L.control.scale({ position: 'bottomright', imperial: false }).addTo(map);
+  baseLight = L.tileLayer('https://services.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Light_Gray_Base/MapServer/tile/{z}/{y}/{x}',
+    { attribution: 'Tiles &copy; Esri', maxZoom: 16 }).addTo(map);
+  baseDark = L.tileLayer('https://services.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Dark_Gray_Base/MapServer/tile/{z}/{y}/{x}',
+    { attribution: 'Tiles &copy; Esri', maxZoom: 16 });
+  baseSat = L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',
+    { attribution: 'Tiles &copy; Esri, Maxar', maxZoom: 18 });
+  map.createPane('labels'); map.getPane('labels').style.zIndex = 450; map.getPane('labels').style.pointerEvents = 'none';
+  labelsLight = L.tileLayer('https://services.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Light_Gray_Reference/MapServer/tile/{z}/{y}/{x}',
+    { pane: 'labels', maxZoom: 16 }).addTo(map);
+  labelsLayer = L.tileLayer('https://services.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Dark_Gray_Reference/MapServer/tile/{z}/{y}/{x}',
+    { pane: 'labels', maxZoom: 16 });
+
+  cellLayer = L.layerGroup().addTo(map);
+  districtLayer = L.geoJSON(districts, { interactive: false, style: { color: 'rgba(34,48,43,0.45)', weight: 0.7, fill: false } }).addTo(map);
+  highlightLayer = L.layerGroup().addTo(map);
+  pointsLayer = L.layerGroup().addTo(map);
+  pickLayer = L.layerGroup().addTo(map);
+
+  const hover = document.getElementById('hoverBox');
+  map.on('mousemove', e => {
+    const c = findCell(e.latlng);
+    hoverDistrict(c ? c[DID] : null);
+    if (!c) { hover.style.display = 'none'; return; }
+    hover.style.display = 'block';
+    hover.innerHTML = cellHtml(c, false);
+  });
+  map.on('mouseout', () => { hover.style.display = 'none'; hoverDistrict(null); });
+  map.on('click', e => pickLocation(e.latlng.lat, e.latlng.lng));
+  document.getElementById('btnGoto').addEventListener('click', zoomToArea);
+
+  const form = document.getElementById('mapSearch'), input = document.getElementById('mapSearchInput');
+  form.addEventListener('submit', e => {
+    e.preventDefault();
+    const m = input.value.trim().match(/^(-?\d+(?:\.\d+)?)\s*[,; ]\s*(-?\d+(?:\.\d+)?)$/);
+    const lat = m && parseFloat(m[1]), lon = m && parseFloat(m[2]);
+    if (!m || Math.abs(lat) > 90 || Math.abs(lon) > 180) {
+      form.classList.add('err'); input.value = ''; input.placeholder = 'Sai định dạng — vd: 10.776, 106.700'; return;
+    }
+    form.classList.remove('err');
+    map.setView([lat, lon], Math.max(map.getZoom(), 12));
+    pickLocation(lat, lon);
+  });
+  input.addEventListener('input', () => form.classList.remove('err'));
+}
+
+// Bấm bản đồ / tìm tọa độ: ô 1 km tại vị trí + điểm mẫu pixel thật gần nhất (PostGIS, không nội suy)
+async function pickLocation(lat, lon) {
+  pickLayer.clearLayers();
+  L.marker([lat, lon], { interactive: false, icon: L.divIcon({ className: '', html: '<div class="pick-marker"></div>', iconSize: [16, 16], iconAnchor: [8, 8] }) }).addTo(pickLayer);
+  const c = findCell(L.latLng(lat, lon));
+  const head = c ? cellHtml(c, true) : `<div class="pt">${lat.toFixed(4)}, ${lon.toFixed(4)}</div><div style="color:var(--muted)">Không có ô lưới 1 km tại vị trí này${state.coverageOnly ? ' (hoặc ô bị ẩn do lọc ≥ 50% dữ liệu)' : ''}${state.area !== 'all' ? ' trong khu vực đang chọn' : ''}.</div>`;
+  const popup = L.popup({ maxWidth: 320 }).setLatLng([lat, lon]).setContent(head + '<div class="pp-sample" style="color:var(--dim)">Đang tìm điểm mẫu gần nhất…</div>').openOn(map);
+  let d;
+  try { const r = await fetch(API.nearest(lat.toFixed(6), lon.toFixed(6), state.year)); d = await r.json(); if (!r.ok) throw new Error(d.detail); }
+  catch (e) { popup.setContent(head + `<div class="pp-sample" style="color:var(--dim)">Không có điểm mẫu pixel cho năm ${state.year}.</div>`); return; }
+  L.circleMarker([d.lat, d.lon], { radius: 6, color: '#fff', weight: 2, fillColor: rampColor(LAYERS.lst.colors, (d.lst - 25) / 20), fillOpacity: 1, interactive: false }).addTo(pickLayer);
+  if (d.distance_m > 30) L.polyline([[lat, lon], [d.lat, d.lon]], { color: '#22302B', weight: 1.4, dashArray: '4 4', interactive: false }).addTo(pickLayer);
+  const dist = d.distance_m < 1000 ? `${fmt(d.distance_m, 0)} m` : `${fmt(d.distance_m / 1000, 1)} km`;
+  const low = d.n_obs !== null && d.n_obs !== undefined && d.n_obs <= LOW_OBS;
+  popup.setContent(head + `<div class="pp-sample"><div class="h">Điểm đo mẫu (ô ảnh 100 m) gần nhất · cách ${dist}</div>
+    LST <b>${fmt(d.lst, 1)}°C</b> · UTFVI <b>${fmt(d.utfvi, 3)}</b> (${d.utfvi_class || '—'})<br>
+    NDVI <b>${fmt(d.ndvi, 2)}</b> · NDBI <b>${fmt(d.ndbi, 2)}</b>${d.n_obs != null ? ` · <span class="${low ? 'warn-txt' : ''}">${d.n_obs} ảnh hợp lệ${low ? ' ⚠ ít quan trắc' : ''}</span>` : ''}</div>`);
+}
+
+function drawPoints(h) {
+  pointsLayer.clearLayers();
+  if (!state.showPoints || !h || !h.count) return;
+  // Điểm mẫu chỉ có LST/NDVI/NDBI -> lớp NDWI/UTFVI tô theo LST với thang 25–45°C
+  const key = ['lst', 'ndvi', 'ndbi'].includes(state.layer) ? state.layer : 'lst';
+  const col = { lst: 2, ndvi: 3, ndbi: 4 }[key];
+  const [lo, hi] = key === state.layer ? currentRange : [25, 45];
+  const renderer = L.canvas({ padding: 0.2 });
+  pointsInArea(h).forEach(p => {
+    const low = p[5] !== null && p[5] !== undefined && p[5] <= LOW_OBS;
+    L.circleMarker([p[0], p[1]], {
+      renderer, radius: 3.5, weight: low ? 1.6 : 0.6, color: low ? '#F5A623' : '#0A1120',
+      fillColor: rampColor(LAYERS[key].colors, (p[col] - lo) / ((hi - lo) || 1)), fillOpacity: 0.95,
+    }).bindTooltip(`LST ${fmt(p[2], 1)}°C · NDVI ${fmt(p[3], 2)} · NDBI ${fmt(p[4], 2)}${p[5] != null ? ` · ${p[5]} ảnh${low ? ' ⚠' : ''}` : ''}`)
+      .on('click', e => { L.DomEvent.stopPropagation(e); pickLocation(p[0], p[1]); })
+      .addTo(pointsLayer);
+  });
+}
+
+// Tên quận/huyện GAUL chứa (hoặc gần nhất) một tọa độ — dựa vào ô lưới 1 km gần nhất đã được PostGIS gán quận/huyện
+function nearestDistrictName(lat, lon) {
+  const g = gridCache[state.year];
+  if (!g || !g.cells.length) return null;
+  let best = null, bd = Infinity;
+  g.cells.forEach(c => { const d = (c[0] - lat) ** 2 + (c[1] - lon) ** 2; if (d < bd && c[DID]) { bd = d; best = c; } });
+  const d = best ? districtById[best[DID]] : null;
+  return d ? `${d.name_vi} (${PROVINCE_VI[d.province] || d.province})` : null;
+}
+
+// Điểm đo thuộc khu vực đang chọn (dựa trên quận/huyện PostGIS đã gán cho từng điểm)
+function pointsInArea(h) {
+  if (!h || !h.points) return [];
+  if (state.area === 'all') return h.points;
+  if (state.area.startsWith('province:')) {
+    const prov = state.area.slice(9);
+    return h.points.filter(p => p[6] && districtById[p[6]] && districtById[p[6]].province === prov);
+  }
+  return h.points.filter(p => String(p[6]) === state.area.slice(9));
+}
+
+// Cấu hình 4 ô thống kê theo chỉ số. Điểm đo chỉ có LST, NDVI, NDBI (không có NDWI).
+const SAMPLE_CFG = {
+  lst:  { col: 2, unit: '°C', dp: 1, name: 'nhiệt độ', thr: 40, thrLabel: 'Điểm đo nóng hơn 40°C', thrMean: 'nóng trên 40°C',
+          topLabel: '5% điểm nóng nhất có nhiệt độ từ', maxLabel: 'Điểm đo nóng nhất' },
+  ndvi: { col: 3, unit: '', dp: 2, name: 'NDVI', thr: 0.5, thrLabel: 'Điểm đo nhiều cây xanh (NDVI > 0,5)', thrMean: 'nhiều cây xanh',
+          topLabel: '5% điểm xanh nhất có NDVI từ', maxLabel: 'Điểm đo xanh nhất' },
+  ndbi: { col: 4, unit: '', dp: 2, name: 'NDBI', thr: 0, thrLabel: 'Điểm đo chủ yếu là công trình (NDBI > 0)', thrMean: 'chủ yếu là nhà cửa, bê tông',
+          topLabel: '5% điểm bê tông hoá nhất có NDBI từ', maxLabel: 'Điểm đo bê tông hoá cao nhất' },
+};
+SAMPLE_CFG.utfvi = SAMPLE_CFG.lst; SAMPLE_CFG.ndwi = SAMPLE_CFG.lst;
+
+function renderSampleStats(h) {
+  const box = document.querySelector('.samples');
+  const labels = box.querySelectorAll('.kpis .kpi .k');
+  const key = ['lst', 'ndvi', 'ndbi'].includes(state.layer) ? state.layer : 'lst';
+  const cfg = SAMPLE_CFG[key];
+  box.querySelector('h4').firstChild.textContent = `Điểm đo mẫu · ${areaLabel(state.area)} `;
+  document.getElementById('spYear').textContent = `· ${state.year}`;
+  labels[0].textContent = cfg.thrLabel; labels[1].textContent = cfg.topLabel; labels[2].textContent = cfg.maxLabel;
+  const note = document.getElementById('spNote');
+  const pts = pointsInArea(h).filter(p => p[cfg.col] !== null && p[cfg.col] !== undefined);
+  const ids = ['sp1v', 'sp2v', 'sp3v', 'sp4v', 'sp1d', 'sp2d', 'sp3d', 'sp4d'];
+  if (!pts.length) {
+    ids.forEach(id => { document.getElementById(id).textContent = id.endsWith('v') ? '—' : ''; });
+    document.getElementById('sp2d').textContent = `Không có điểm đo nào rơi vào ${areaLabel(state.area)} năm ${state.year}`;
+    note.innerHTML = '';
+    return;
+  }
+  const vals = pts.map(p => p[cfg.col]).sort((x, y) => x - y), n = vals.length;
+  const mean = vals.reduce((x, y) => x + y, 0) / n;
+  const u = cfg.unit ? `<small> ${cfg.unit}</small>` : '';
+  // Ô 1: tỉ lệ điểm vượt ngưỡng
+  const over = vals.filter(v => v > cfg.thr).length, pct = over / n * 100;
+  document.getElementById('sp2v').innerHTML = `${fmt(pct, 1)}<small>%</small>`;
+  document.getElementById('sp2d').textContent = `${fmt(over, 0)} / ${fmt(n, 0)} điểm ${cfg.thrMean}` + (over ? ` · khoảng cứ ${fmt(100 / pct, 0)} điểm thì có 1` : '');
+  // Ô 2: ngưỡng 5% cao nhất
+  document.getElementById('sp3v').innerHTML = `≥ ${fmt(percentile(vals, 0.95), cfg.dp)}${u}`;
+  document.getElementById('sp3d').textContent = `Trung bình các điểm ${fmt(mean, cfg.dp)}${cfg.unit} · thấp nhất ${fmt(vals[0], cfg.dp)}${cfg.unit}`;
+  // Ô 3: điểm cao nhất (kèm độ tin cậy của điểm đó)
+  const top = pts.reduce((x, y) => (y[cfg.col] > x[cfg.col] ? y : x));
+  const hn = top[5], low = hn !== null && hn !== undefined && hn <= LOW_OBS;
+  const where = top[6] && districtById[top[6]] ? `${districtById[top[6]].name_vi} (${PROVINCE_VI[districtById[top[6]].province] || districtById[top[6]].province})` : nearestDistrictName(top[0], top[1]);
+  const odd = key === 'lst' && top[2] >= 50;
+  // chỉ hiện phần giải thích "trên 60°C" khi khu vực đang xem thật sự có điểm nóng bất thường
+  document.querySelector('.explain.why').style.display = odd ? '' : 'none';
+  document.getElementById('sp1v').innerHTML = `${fmt(top[cfg.col], cfg.dp)}${u}`;
+  document.getElementById('sp1d').innerHTML = `${where ? `Tại ${where} · ` : ''}${hn != null ? `<span class="${low ? 'warn-txt' : ''}">${low ? `⚠ chỉ ${hn} ảnh — kém tin cậy` : `${hn} ảnh vệ tinh`}</span>` : ''}${odd ? ' · cao bất thường, xem giải thích bên dưới' : ''}<br><button type="button" class="link" id="spGo">xem trên bản đồ →</button>`;
+  document.getElementById('spGo').addEventListener('click', () => {
+    map.setView([top[0], top[1]], 13);
+    document.getElementById('map').scrollIntoView({ behavior: 'smooth', block: 'center' });
+    pickLocation(top[0], top[1]);
+  });
+  // Ô 4: độ tin cậy = tỉ lệ điểm có từ 3 ảnh vệ tinh hợp lệ trở lên
+  const withObs = pts.filter(p => p[5] !== null && p[5] !== undefined);
+  if (withObs.length) {
+    const good = withObs.filter(p => p[5] > LOW_OBS).length / withObs.length * 100;
+    const [lv, cls] = good >= 80 ? ['Tốt', 'tag-ok'] : good >= 50 ? ['Trung bình', 'tag-mid'] : ['Thấp', 'tag-low'];
+    document.getElementById('sp4v').innerHTML = `<span class="${cls}">${lv}</span>`;
+    document.getElementById('sp4d').textContent = `${fmt(good, 0)}% điểm đo có từ 3 ảnh vệ tinh không mây trở lên${good < 50 ? ' — năm này nhiều mây, so sánh với năm khác cần thận trọng' : ''}`;
+  } else {
+    document.getElementById('sp4v').textContent = '—';
+    document.getElementById('sp4d').textContent = 'Chưa có số ảnh hợp lệ (n_obs)';
+  }
+  // Ghi chú khi ít điểm / chỉ số không có trong điểm đo
+  const msgs = [];
+  if (n < 30) msgs.push(`⚠ Chỉ có <b>${n} điểm đo</b> rơi vào ${areaLabel(state.area)} — quá ít để kết luận chắc chắn; nên xem thêm trung bình khu vực và các ô 1 km phía trên.`);
+  if (state.layer === 'ndwi') msgs.push('Điểm đo mẫu không có chỉ số NDWI, nên khối này hiển thị theo <b>nhiệt độ</b>.');
+  if (state.layer === 'utfvi') msgs.push('Khối này hiển thị theo <b>nhiệt độ</b> của điểm đo (UTFVI được tính từ chính nhiệt độ này).');
+  note.innerHTML = msgs.map(m => `<div>${m}</div>`).join('');
+}
+
+function cellHtml(c, full) {
+  const g = gridCache[state.year], d = c[DID] ? districtById[c[DID]] : null;
+  const u = cellValue(c, 'utfvi', g.lst_mean_year);
+  const lines = [
+    `LST <b>${fmt(c[IDX.lst], 1)}°C</b> · UTFVI <b>${fmt(u, 3)}</b> (${UTFVI_CLASSES[utfviClass(u)]})`,
+    `NDVI <b>${fmt(c[IDX.ndvi], 2)}</b> · NDBI <b>${fmt(c[IDX.ndbi], 2)}</b> · NDWI <b>${fmt(c[IDX.ndwi], 2)}</b>`,
+    `Dữ liệu phủ <b>${fmt(c[COV] * 100, 0)}%</b> diện tích ô`,
+  ];
+  const where = d ? `${d.name_vi} · ${PROVINCE_VI[d.province] || d.province}` : 'Ngoài ranh giới quận/huyện GAUL';
+  if (!full) return `<div style="color:var(--muted);font-size:10.5px">${where}</div>` + lines.join('<br>');
+  return `<div class="pt">Ô 1 km · năm ${state.year}</div><div style="color:var(--muted);font-size:11px;margin-bottom:4px">${where}<br>${c[0].toFixed(4)}, ${c[1].toFixed(4)}</div>` + lines.join('<br>');
+}
+
+// Chỉ mục không gian đơn giản: chia tâm ô vào lưới 0,02° để tra cứu ô dưới con trỏ nhanh.
+function buildIndex(cells) {
+  const idx = new Map();
+  cells.forEach(c => {
+    const k = `${Math.floor(c[0] / 0.02)}:${Math.floor(c[1] / 0.02)}`;
+    (idx.get(k) || idx.set(k, []).get(k)).push(c);
+  });
+  return idx;
+}
+function findCell(ll) {
+  if (!cellIndex) return null;
+  const i = Math.floor(ll.lat / 0.02), j = Math.floor(ll.lng / 0.02);
+  let best = null, bd = Infinity;
+  for (let a = -1; a <= 1; a++) for (let b = -1; b <= 1; b++) {
+    (cellIndex.get(`${i + a}:${j + b}`) || []).forEach(c => {
+      const dy = (c[0] - ll.lat) * 111320, dx = (c[1] - ll.lng) * 111320 * Math.cos(c[0] * Math.PI / 180);
+      const dd = dx * dx + dy * dy;
+      if (dd < bd) { bd = dd; best = c; }
+    });
+  }
+  return best && bd <= 560 * 560 * 2 ? best : null;   // trong phạm vi nửa đường chéo ô 1 km
+}
+
+function bindControls() {
+  document.querySelectorAll('#layerBtns button').forEach(b => b.addEventListener('click', () => {
+    const sel = document.getElementById('fLayer'); sel.value = b.dataset.l; sel.dispatchEvent(new Event('change'));
+  }));
+  const chipsEl = document.getElementById('yearChips');
+  chipsEl.innerHTML = yearly.map(r => `<button type="button" data-y="${r.year}">${r.year}</button>`).join('');
+  chipsEl.querySelectorAll('button').forEach(b => b.addEventListener('click', () => {
+    const yr = document.getElementById('fYear'); yr.value = b.dataset.y; yr.dispatchEvent(new Event('change'));
+  }));
+  let playTimer = null;
+  const playBtn = document.getElementById('btnPlay');
+  const stopPlay = () => { clearInterval(playTimer); playTimer = null; playBtn.classList.remove('on'); playBtn.textContent = '▶ Xem diễn biến'; };
+  playBtn.addEventListener('click', () => {
+    if (playTimer) return stopPlay();
+    const yrs = yearly.map(r => r.year);
+    let i = state.year === yrs[yrs.length - 1] ? 0 : yrs.indexOf(state.year) + 1;
+    playBtn.classList.add('on'); playBtn.textContent = '■ Dừng';
+    const go = () => {
+      if (i >= yrs.length) return stopPlay();
+      const yr = document.getElementById('fYear'); yr.value = yrs[i++]; yr.dispatchEvent(new Event('change'));
+    };
+    go(); playTimer = setInterval(go, 1700);
+  });
+  document.addEventListener('click', e => { const d = document.querySelector('details.opts'); if (d.open && !d.contains(e.target)) d.open = false; });
+  document.getElementById('fLayer').addEventListener('change', e => { state.layer = e.target.value; render(); });
+  document.getElementById('fArea').addEventListener('change', e => { state.area = e.target.value; render(); zoomToArea(); });
+  const yr = document.getElementById('fYear');
+  yr.addEventListener('input', () => { document.getElementById('fYearVal').textContent = yr.value; });
+  yr.addEventListener('change', () => { state.year = parseInt(yr.value, 10); render(); });
+  document.getElementById('fCoverage').addEventListener('change', e => { state.coverageOnly = e.target.checked; render(); });
+  document.getElementById('fPoints').addEventListener('change', async e => { state.showPoints = e.target.checked; drawPoints(await getHeat(state.year).catch(() => null)); });
+  document.querySelectorAll('input[name=fScale]').forEach(r => r.addEventListener('change', e => { state.scale = e.target.value; render(); }));
+  document.querySelectorAll('#fBasemap button').forEach(b => b.addEventListener('click', () => {
+    document.querySelectorAll('#fBasemap button').forEach(x => x.classList.toggle('active', x === b));
+    [baseLight, baseDark, baseSat, labelsLight, labelsLayer].forEach(l => map.removeLayer(l));
+    const k = b.dataset.b;
+    if (k === 'light') { baseLight.addTo(map); labelsLight.addTo(map); }
+    if (k === 'dark') { baseDark.addTo(map); labelsLayer.addTo(map); }
+    if (k === 'sat') { baseSat.addTo(map); labelsLayer.addTo(map); }
+    // ranh giới quận/huyện đổi màu theo nền để luôn nhìn rõ
+    districtLayer.setStyle({ color: k === 'light' || k === 'none' ? 'rgba(34,48,43,0.45)' : 'rgba(255,255,255,0.45)' });
+  }));
+  document.querySelectorAll('#rankSort button').forEach(b => b.addEventListener('click', () => {
+    document.querySelectorAll('#rankSort button').forEach(x => x.classList.toggle('active', x === b));
+    state.rankSort = b.dataset.s; renderRanking();
+  }));
+  document.querySelectorAll('#tabs .tab').forEach(t => t.addEventListener('click', () => {
+    document.querySelectorAll('#tabs .tab').forEach(x => x.classList.toggle('active', x === t));
+    document.querySelectorAll('.pane').forEach(p => p.classList.toggle('active', p.id === t.dataset.pane));
+    if (t.dataset.pane === 'pMap') setTimeout(() => map.invalidateSize(), 50);
+    if (t.dataset.pane === 'pHistory') renderHistory();
+    // đợi trình duyệt vẽ xong tab vừa hiện rồi mới tạo biểu đồ (để đo đúng kích thước khung)
+    requestAnimationFrame(() => setTimeout(() => {
+      ensurePaneCharts(t.dataset.pane);
+    }, 0));
+  }));
+  document.getElementById('btnExport').addEventListener('click', exportCSV);
+}
+
+function zoomToArea() {
+  if (state.area === 'all') { if (currentCells.length) map.fitBounds(L.latLngBounds(currentCells.map(c => [c[0], c[1]])).pad(0.03)); return; }
+  const feats = districts.features.filter(f => state.area.startsWith('province:')
+    ? f.properties.province === state.area.slice(9) : String(f.properties.id) === state.area.slice(9));
+  if (feats.length) map.fitBounds(L.geoJSON({ type: 'FeatureCollection', features: feats }).getBounds().pad(0.05), { maxZoom: 13 });
+}
+
+// ---------------- Render chính ----------------
+let hoverLayer = null, hoverId = null;
+// Làm nổi quận/huyện (khi rê chuột trên bản đồ hoặc trên bảng xếp hạng)
+function hoverDistrict(id) {
+  if (id === hoverId) return;
+  hoverId = id;
+  if (!hoverLayer) hoverLayer = L.layerGroup().addTo(map);
+  hoverLayer.clearLayers();
+  const tip = document.getElementById('areaTip');
+  const f = id ? districts.features.find(x => x.properties.id === id) : null;
+  if (!f) { tip.classList.remove('show'); return; }
+  L.geoJSON(f, { interactive: false, style: { color: '#13253A', weight: 2.4, fill: true, fillColor: '#ffffff', fillOpacity: 0.12 } }).addTo(hoverLayer);
+  tip.textContent = `${f.properties.name_vi} · ${PROVINCE_VI[f.properties.province] || f.properties.province}`;
+  tip.classList.add('show');
+}
+
+// Hiệu ứng số chạy: tìm con số đầu tiên trong ô và tăng dần từ giá trị cũ tới giá trị mới
+function countUp(el) {
+  const html = el.innerHTML, m = html.match(/[−-]?\d{1,3}(?:\.\d{3})*(?:,\d+)?/);
+  if (!m) return;
+  const txt = m[0], dec = (txt.split(',')[1] || '').length;
+  const to = parseFloat(txt.replace('−', '-').replace(/\./g, '').replace(',', '.'));
+  const from = el._last !== undefined ? el._last : to * 0.6;
+  el._last = to;
+  if (!isFinite(to) || from === to) return;
+  const t0 = performance.now(), D = 550;
+  const step = now => {
+    const k = Math.min(1, (now - t0) / D), e = 1 - Math.pow(1 - k, 3), v = from + (to - from) * e;
+    el.innerHTML = html.replace(txt, (v < 0 ? '−' : '') + fmt(Math.abs(v), dec));
+    if (k < 1) requestAnimationFrame(step); else el.innerHTML = html;
+  };
+  requestAnimationFrame(step);
+}
+
+// Đường xu hướng nhỏ 2020–2026 trong ô "trung bình" (điểm đậm = năm đang xem)
+function drawSpark(series, key) {
+  const svg = document.getElementById('k1spark');
+  const pts = series.filter(r => r[key] !== null && r[key] !== undefined);
+  if (pts.length < 2) { svg.innerHTML = ''; return; }
+  const ys = pts.map(r => r[key]), lo = Math.min(...ys), hi = Math.max(...ys), W = 200, H = 38, P = 4;
+  const X = i => P + i * (W - 2 * P) / (pts.length - 1), Y = v => H - P - (v - lo) / ((hi - lo) || 1) * (H - 2 * P);
+  const line = pts.map((r, i) => `${i ? 'L' : 'M'}${X(i).toFixed(1)} ${Y(r[key]).toFixed(1)}`).join('');
+  const ci = pts.findIndex(r => r.year === state.year);
+  svg.innerHTML = `<path d="${line} L${X(pts.length - 1)} ${H} L${X(0)} ${H}Z" fill="rgba(13,122,112,.10)"/>
+    <path d="${line}" fill="none" stroke="#0D7A70" stroke-width="1.8" vector-effect="non-scaling-stroke"/>
+    ${pts.map((r, i) => `<circle cx="${X(i)}" cy="${Y(r[key])}" r="${i === ci ? 3.6 : 1.8}" fill="${i === ci ? '#C2560C' : '#0D7A70'}" vector-effect="non-scaling-stroke"><title>${r.year}: ${fmt(r[key], key === 'lst' ? 2 : 3)}</title></circle>`).join('')}`;
+}
+
+async function render() {
+  const L_ = LAYERS[state.layer];
+  const box = document.querySelector('.map-box'); box.classList.add('busy');
+  const yrs = yearly.map(r => r.year), yi = yrs.indexOf(state.year);
+  document.getElementById('yearTrack').style.width = `${((yi + 1) / yrs.length * 100).toFixed(1)}%`;
+  document.getElementById('fYearVal').textContent = state.year;
+  document.querySelectorAll('#yearChips button').forEach(b => b.classList.toggle('active', +b.dataset.y === state.year));
+  document.querySelectorAll('#layerBtns button').forEach(b => b.classList.toggle('active', b.dataset.l === state.layer));
+  document.getElementById('layerHelp').innerHTML = LAYER_HELP[state.layer];
+  document.getElementById('k3m').textContent = state.layer === 'lst' || state.layer === 'utfvi'
+    ? 'Nghĩa là: phần diện tích nóng hơn hẳn mặt bằng chung của vùng — nơi cần ưu tiên giảm nhiệt.'
+    : 'Nghĩa là: tỉ lệ ô 1 km mà chỉ số này mang giá trị dương (đặc điểm nổi trội).';
+  document.getElementById('title').innerHTML = `${L_.name} <span class="acc">(${L_.short})</span>`;
+  document.getElementById('subtitle').textContent = `Năm ${state.year} · mùa khô (01–03) · ${areaLabel(state.area)} · Dữ liệu lịch sử 2020–2026`;
+
+  let g;
+  try { g = await getGrid(state.year); } catch (e) { g = { count: 0, cells: [] }; }
+  const empty = document.getElementById('mapEmpty');
+  if (!g.count) {
+    empty.style.display = 'flex';
+    empty.innerHTML = `Chưa có dữ liệu lưới 1 km cho năm ${state.year}.<br>Chạy notebook mục 9d rồi <code>python manage.py load_uhi_data</code>.`;
+    cellLayer.clearLayers(); cellIndex = null; currentCells = [];
+  } else {
+    empty.style.display = 'none';
+  }
+
+  const all = g.cells || [];
+  const cells = all.filter(c => (!state.coverageOnly || c[COV] >= 0.5) && inArea(c, state.area) && cellValue(c, state.layer, g.lst_mean_year) !== null);
+  currentCells = cells;
+  cellIndex = buildIndex(cells);
+
+  // Thang màu
+  if (!L_.categorical) {
+    if (state.scale === 'fixed' && g.range_all) {
+      currentRange = g.range_all[state.layer];
+    } else {
+      const v = all.map(c => c[IDX[state.layer]]).filter(x => x !== null).sort((a, b) => a - b);
+      currentRange = [percentile(v, 0.02), percentile(v, 0.98)];
+    }
+  }
+  drawCells(cells, g.lst_mean_year);
+  drawHighlight();
+  pickLayer.clearLayers(); map.closePopup();
+  const h = await getHeat(state.year).catch(() => null);
+  drawPoints(h);
+  renderSampleStats(h);
+  renderLegend(g);
+  await renderStats(g, cells, all);
+  renderRanking();
+  if (document.getElementById('pHistory').classList.contains('active')) renderHistory();
+  loadForecast();
+  document.querySelectorAll('.kpis .v.num').forEach(countUp);
+  setTimeout(() => box.classList.remove('busy'), 250);
+}
+
+function colorFor(c, lstMean) {
+  const L_ = LAYERS[state.layer];
+  if (L_.categorical) return UTFVI_COLORS[utfviClass(cellValue(c, 'utfvi', lstMean))];
+  const [lo, hi] = currentRange;
+  return rampColor(L_.colors, (c[IDX[state.layer]] - lo) / ((hi - lo) || 1));
+}
+
+function drawCells(cells, lstMean) {
+  cellLayer.clearLayers();
+  const renderer = L.canvas({ padding: 0.2 });
+  cells.forEach(c => {
+    const dLat = 500 / 111320, dLon = 500 / (111320 * Math.cos(c[0] * Math.PI / 180));
+    const col = colorFor(c, lstMean);
+    L.rectangle([[c[0] - dLat, c[1] - dLon], [c[0] + dLat, c[1] + dLon]], {
+      renderer, interactive: false, stroke: true, weight: 0.4, color: col, fillColor: col, fillOpacity: 0.85,
+    }).addTo(cellLayer);
+  });
+}
+
+function drawHighlight() {
+  highlightLayer.clearLayers();
+  if (state.area === 'all') return;
+  const feats = districts.features.filter(f => state.area.startsWith('province:')
+    ? f.properties.province === state.area.slice(9) : String(f.properties.id) === state.area.slice(9));
+  L.geoJSON({ type: 'FeatureCollection', features: feats }, { interactive: false, style: { color: '#22302B', weight: 2.6, fill: false, dashArray: '6 4' } }).addTo(highlightLayer);
+}
+
+function renderLegend(g) {
+  const L_ = LAYERS[state.layer], el = document.getElementById('legend');
+  const badge = state.scale === 'fixed' ? 'Cố định 2020–2026' : `Động năm ${state.year}`;
+  const head = `<div class="t">${L_.name} (${L_.short})${L_.unit ? ` (${L_.unit})` : ''}</div>
+    <div class="s"><span>Năm ${state.year} · ${areaLabel(state.area)}</span>${L_.categorical ? '' : `<span class="badge">${badge}</span>`}</div>`;
+  if (L_.categorical) {
+    el.innerHTML = head + `<div class="cats">${UTFVI_CLASSES.map((n, i) => `<span><i style="background:${UTFVI_COLORS[i]}"></i>${n}</span>`).join('')}</div>
+      <div class="note">UTFVI = (LST − ${fmt(g.lst_mean_year, 2)}) / ${fmt(g.lst_mean_year, 2)} · ngưỡng như notebook mục 8.</div>`;
+    return;
+  }
+  const [lo, hi] = currentRange;
+  const ticks = [0, 0.25, 0.5, 0.75, 1].map(t => fmt(lo + (hi - lo) * t, L_.dp));
+  el.innerHTML = head + `<div class="ticks">${ticks.map(t => `<span>${t}</span>`).join('')}</div>
+    <div class="bar" style="background:linear-gradient(90deg,${L_.colors.join(',')})"></div>
+    <div class="ends"><span>◀ ${L_.ends[0]}</span><span>${L_.ends[1]} ▶</span></div>
+    <div class="note">Hai đầu thang = phân vị 2% và 98%; ô ngoài khoảng tô màu ở đầu mút.</div>`;
+}
+
+// Chuỗi theo năm của khu vực đang chọn (nguồn chuẩn cho giá trị trung bình)
+function scopeOf(area) { return area === 'all' ? 'all' : area; }
+
+async function renderStats(g, cells, all) {
+  const L_ = LAYERS[state.layer], key = state.layer === 'utfvi' ? 'lst' : state.layer;
+  const hist = await getHistory(scopeOf(state.area));
+  const series = hist.series.filter(s => s[key] !== null);
+  const cur = series.find(s => s.year === state.year), prev = series.find(s => s.year === state.year - 1);
+  const periodMean = series.reduce((a, s) => a + s[key], 0) / (series.length || 1);
+  const unit = key === 'lst' ? '°C' : '', dp = key === 'lst' ? 1 : 3;
+
+  // Chip + banner
+  const chips = [];
+  if (cur) {
+    const diffP = cur[key] - periodMean;
+    chips.push(`<span class="chip ${diffP >= 0 ? 'warm' : 'cool'}">● ${diffP >= 0 ? 'Cao hơn' : 'Thấp hơn'} TB 2020–2026 (<b>${fmtS(diffP, dp)}${unit}</b>)</span>`);
+    chips.push(`<span class="chip">Trung bình: <b>${fmt(cur[key], dp)}${unit}</b></span>`);
+    if (prev) chips.push(`<span class="chip">So với ${prev.year}: <b>${fmtS(cur[key] - prev[key], dp)}${unit}</b> (${cur[key] >= prev[key] ? 'tăng' : 'giảm'})</span>`);
+  }
+  document.getElementById('chips').innerHTML = chips.join('');
+  const cellsAll = all.filter(c => inArea(c, state.area));
+  document.getElementById('bannerTags').innerHTML = [
+    cur ? `<span>${L_.short === 'UTFVI' ? 'LST' : L_.short} TB: ${fmt(cur[key], dp)}${unit}</span>` : '',
+    `<span>Nguồn: Landsat 8/9 (TIRS &amp; OLI)</span>`,
+    `<span>Lưới 1 km · ${fmt(cellsAll.length, 0)} ô</span>`,
+  ].join('');
+  document.getElementById('bannerTitle').textContent = `Hiện trạng ${L_.name.toLowerCase()} (${L_.short}) tại ${areaLabel(state.area)} — năm ${state.year}`;
+  document.getElementById('bannerText').textContent = cur
+    ? `${key === 'lst' ? 'Nhiệt độ bề mặt' : L_.short} trung bình ${fmt(cur[key], dp)}${unit}, ${cur[key] >= periodMean ? 'cao hơn' : 'thấp hơn'} trung bình giai đoạn 2020–2026 (${fmt(periodMean, dp)}${unit})${prev ? `; ${cur[key] >= prev[key] ? 'tăng' : 'giảm'} ${fmt(Math.abs(cur[key] - prev[key]), dp)}${unit} so với ${prev.year}` : ''}.`
+    : `Chưa có giá trị trung bình cho khu vực này.`;
+
+  // KPI
+  const vals = cells.map(c => cellValue(c, state.layer, g.lst_mean_year)).sort((a, b) => a - b);
+  document.getElementById('k1k').textContent = `${key === 'lst' ? 'Nhiệt độ bề mặt' : L_.name} trung bình · ${areaLabel(state.area)}`;
+  document.getElementById('k1v').innerHTML = cur ? `${fmt(cur[key], dp)}${unit ? `<small> ${unit}</small>` : ''}` : '—';
+  drawSpark(series, key);
+  document.getElementById('k1d').innerHTML = cur && prev
+    ? `<span class="pill ${cur[key] >= prev[key] ? 'up' : 'down'}">${cur[key] >= prev[key] ? '↑' : '↓'} ${fmtS(cur[key] - prev[key], dp)}${unit} so với ${prev.year}</span>` : (cur ? 'Năm đầu chuỗi' : '');
+  const vdp = state.layer === 'lst' ? 1 : (state.layer === 'utfvi' ? 3 : 2), vu = state.layer === 'lst' ? '°C' : '';
+  // 90% số ô nằm trong khoảng P5–P95 -> dễ hiểu hơn min–max (bị kéo bởi vài ô bất thường)
+  document.getElementById('k2k').textContent = 'Khoảng giá trị phổ biến (90% số ô)';
+  document.getElementById('k2v').innerHTML = vals.length ? `${fmt(percentile(vals, 0.05), vdp)} – ${fmt(percentile(vals, 0.95), vdp)}${vu ? `<small> ${vu}</small>` : ''}` : '—';
+  document.getElementById('k2d').textContent = vals.length ? `Thấp nhất ${fmt(vals[0], vdp)}${vu} · cao nhất ${fmt(vals[vals.length - 1], vdp)}${vu} (ô 1 km)` : '';
+
+  let k3k, share, k3d;
+  if (state.layer === 'lst' || state.layer === 'utfvi') {
+    const n = cells.filter(c => utfviClass(cellValue(c, 'utfvi', g.lst_mean_year)) === 5).length;
+    k3k = 'Diện tích đảo nhiệt mức "Nghiêm trọng"'; share = n / (cells.length || 1);
+    k3d = `${fmt(n, 0)} ô 1 km nóng hơn trung bình vùng trên 2% (LST > ${fmt(g.lst_mean_year * 1.02, 1)}°C)`;
+  } else {
+    const n = vals.filter(v => v > 0).length; share = n / (vals.length || 1);
+    k3k = { ndvi: 'Tỉ lệ ô có thực vật (NDVI > 0)', ndbi: 'Tỉ lệ ô chủ yếu xây dựng (NDBI > 0)', ndwi: 'Tỉ lệ ô có mặt nước (NDWI > 0)' }[state.layer];
+    k3d = `${fmt(n, 0)} ô`;
+  }
+  document.getElementById('k3k').textContent = k3k;
+  document.getElementById('k3v').innerHTML = cells.length ? `${fmt(share * 100, 1)}<small>%</small>` : '—';
+  document.getElementById('k3d').textContent = cells.length ? k3d : '';
+  document.getElementById('k4v').innerHTML = `${fmt(cells.length, 0)}<small> ô 1 km</small>`;
+  document.getElementById('k4d').textContent = cellsAll.length
+    ? `${fmt(cells.length / cellsAll.length * 100, 0)}% lưới của khu vực${state.coverageOnly ? ' (đã lọc ≥ 50% dữ liệu)' : ''}` : '';
+}
+
+async function renderRanking() {
+  const L_ = LAYERS[state.layer], key = state.layer === 'utfvi' ? 'lst' : state.layer;
+  document.getElementById('rankYear').textContent = `· ${key.toUpperCase()} · ${state.year}`;
+  let rows;
+  try { rows = await getStats(state.year); } catch (e) { rows = []; }
+  if (state.area.startsWith('province:')) rows = rows.filter(r => r.province === state.area.slice(9));
+  rows = rows.filter(r => r[key] !== null).sort((a, b) => state.rankSort === 'desc' ? b[key] - a[key] : a[key] - b[key]);
+  const el = document.getElementById('rankList');
+  if (!rows.length) { el.innerHTML = '<div class="foot-note" style="padding:14px 0">Chưa có thống kê quận/huyện (notebook mục 9d).</div>'; return; }
+  // Độ dài/màu thanh theo khoảng phân vị 5–95% để một vài quận bất thường không làm các quận khác mờ đi
+  const vs = rows.map(r => r[key]), sv = [...vs].sort((a, b) => a - b);
+  const lo = percentile(sv, 0.05), hi = percentile(sv, 0.95);
+  const colors = LAYERS[key].colors, dp = key === 'lst' ? 2 : 3, unit = key === 'lst' ? '°C' : '';
+  const selId = state.area.startsWith('district:') ? state.area.slice(9) : null;
+  el.innerHTML = rows.map((r, i) => {
+    const t = Math.max(0, Math.min(1, (r[key] - lo) / ((hi - lo) || 1)));
+    return `<div class="rank-row${String(r.id) === selId ? ' sel' : ''}" data-id="${r.id}">
+      <span class="i">${i + 1}</span>
+      <span class="n">${r.name_vi}${r.name_vi === 'Côn Đảo' && key === 'ndbi' ? ' <span class="warn-txt" title="Đảo nhỏ, phần lớn ô ảnh sát biển — NDBI cao bất thường, không phản ánh mức bê tông hoá">⚠</span>' : ''}<small>${PROVINCE_VI[r.province] || r.province}</small></span>
+      <span class="b"><div style="width:${(8 + t * 92).toFixed(1)}%;background:${rampColor(colors, t)}"></div></span>
+      <span class="v">${fmt(r[key], dp)}${unit}</span></div>`;
+  }).join('');
+  el.querySelectorAll('.rank-row').forEach(row => {
+    row.addEventListener('mouseenter', () => hoverDistrict(+row.dataset.id));
+    row.addEventListener('mouseleave', () => hoverDistrict(null));
+  });
+  el.querySelectorAll('.rank-row').forEach(row => row.addEventListener('click', () => {
+    state.area = `district:${row.dataset.id}`;
+    document.getElementById('fArea').value = state.area;
+    render(); zoomToArea();
+  }));
+}
+
+// ---------------- Lịch sử ----------------
+async function renderUtfviHistory() {
+  const scope = scopeOf(state.area);
+  const h = utfviHistCache[scope] || (utfviHistCache[scope] = await getJSON(`/api/map/utfvi-history/?scope=${encodeURIComponent(scope)}`));
+  document.getElementById('histTitle').textContent = `Cường độ đảo nhiệt (UTFVI) — ${areaLabel(state.area)}, 2020–2026: tỉ lệ diện tích từng mức`;
+  document.getElementById('histSource').textContent = `Nguồn: ${h.source}`;
+  const s = h.series;
+  const data = {
+    labels: s.map(r => r.year),
+    datasets: h.levels.map((name, i) => ({ label: name, data: s.map(r => r.shares[i]), backgroundColor: UTFVI_COLORS[i], borderWidth: 0, borderRadius: 2 })),
+  };
+  const opts = { responsive: true, maintainAspectRatio: false,
+    plugins: { legend: { labels: { color: '#566375', usePointStyle: true, boxWidth: 8 } },
+               tooltip: { callbacks: { label: c => `${c.dataset.label}: ${fmt(c.raw, 1)}%` } } },
+    scales: { x: { stacked: true, grid: { display: false }, ticks: { color: '#566375' } },
+              y: { stacked: true, max: 100, title: { display: true, text: '% diện tích có dữ liệu', color: '#566375' }, grid: { color: 'rgba(34,48,43,0.08)' }, ticks: { color: '#566375', callback: v => v + '%' } } } };
+  if (histChart) histChart.destroy();
+  histChart = new Chart(document.getElementById('histChart'), { type: 'bar', data, options: opts });
+  document.getElementById('histTable').innerHTML = `<thead><tr><th>Năm</th>${h.levels.map(n => `<th>${n}</th>`).join('')}<th>Cơ sở tính</th></tr></thead><tbody>` +
+    s.map(r => `<tr${r.year === state.year ? ' style="background:rgba(13,122,112,.08)"' : ''}><td>${r.year}</td>${r.shares.map(v => `<td>${fmt(v, 1)}%</td>`).join('')}<td>${fmt(r.n, 0)} ${h.unit}</td></tr>`).join('') + '</tbody>';
+  document.getElementById('histNote').innerHTML = 'UTFVI so sánh mỗi nơi với <b>trung bình của chính năm đó</b>, nên không có “UTFVI trung bình” theo năm (luôn gần 0). Biểu đồ cho thấy <b>phần diện tích ở từng mức đảo nhiệt</b> — cột đỏ đậm (Nghiêm trọng) càng cao thì chênh lệch nóng giữa các khu vực càng lớn.';
+}
+
+async function renderHistory() {
+  if (state.layer === 'utfvi') return renderUtfviHistory();
+  document.getElementById('histNote').innerHTML = '';
+  if (histChart && histChart.config.type !== 'line') { histChart.destroy(); histChart = null; }
+  const key = state.layer, L_ = LAYERS[key];
+  const hist = await getHistory(scopeOf(state.area));
+  document.getElementById('histTitle').textContent = `${L_.name} (${L_.short}) — ${areaLabel(state.area)}, 2020–2026`;
+  document.getElementById('histSource').textContent = `Nguồn: ${hist.source}`;
+  const s = hist.series;
+  const data = {
+    labels: s.map(r => r.year),
+    datasets: [{ label: `${L_.short} trung bình${L_.unit ? ` (${L_.unit})` : ''}`, data: s.map(r => r[key]),
+      borderColor: key === 'lst' ? '#F5A623' : '#0F766E', backgroundColor: 'rgba(56,189,248,0.08)', tension: 0.3, borderWidth: 2.5,
+      pointRadius: s.map(r => r.year === state.year ? 7 : 4), pointBackgroundColor: key === 'lst' ? '#F5A623' : '#0F766E', fill: true }],
+  };
+  const opts = { responsive: true, maintainAspectRatio: false,
+    plugins: { legend: { labels: { color: '#5C6762', usePointStyle: true, boxWidth: 8 } } },
+    scales: { x: { grid: { color: 'rgba(34,48,43,0.08)' }, ticks: { color: '#5C6762' } },
+              y: { grid: { color: 'rgba(34,48,43,0.08)' }, ticks: { color: '#5C6762' } } } };
+  if (histChart) { histChart.data = data; histChart.update(); }
+  else histChart = new Chart(document.getElementById('histChart'), { type: 'line', data, options: opts });
+  const dp = key === 'lst' ? 2 : 3;
+  document.getElementById('histTable').innerHTML = `<thead><tr><th>Năm</th><th>LST (°C)</th><th>NDVI</th><th>NDBI</th><th>NDWI</th></tr></thead><tbody>` +
+    s.map(r => `<tr${r.year === state.year ? ' style="background:rgba(56,189,248,.08)"' : ''}><td>${r.year}</td><td>${fmt(r.lst, 2)}</td><td>${fmt(r.ndvi, 3)}</td><td>${fmt(r.ndbi, 3)}</td><td>${fmt(r.ndwi, 3)}</td></tr>`).join('') + '</tbody>';
+}
+
+// ---------------- Dự báo + kiểm định (theo chỉ số + khu vực, notebook mục 11c) ----------------
+let fcData = null, fcCache = {};
+const FC_UNIT = { lst: '°C', ndvi: '', ndbi: '', ndwi: '' };
+const FC_DP = { lst: 2, ndvi: 3, ndbi: 3, ndwi: 3 };
+const FC_NAME = { lst: 'Nhiệt độ bề mặt (LST)', ndvi: 'Cây xanh (NDVI)', ndbi: 'Bê tông hoá (NDBI)', ndwi: 'Độ ẩm (NDWI)' };
+
+// Phạm vi có dự báo: toàn vùng hoặc 1 quận/huyện; chỉ số: LST/NDVI/NDBI/NDWI (UTFVI là chỉ số tương đối theo năm -> dùng LST)
+function fcTarget() {
+  const index = state.layer === 'utfvi' ? 'lst' : state.layer;
+  const scope = state.area.startsWith('district:') ? state.area : 'all';
+  return { index, scope };
+}
+
+async function loadForecast() {
+  const { index, scope } = fcTarget(), k = `${scope}|${index}`;
+  const f = fcData = fcCache[k] || (fcCache[k] = await getJSON(`/api/map/forecast-series/?scope=${encodeURIComponent(scope)}&index=${index}`));
+  const unit = FC_UNIT[index], dp = FC_DP[index], name = FC_NAME[index];
+  const where = scope === 'all' ? 'toàn vùng' : areaLabel(scope);
+
+  // Ghi chú khi lựa chọn không có dự báo riêng
+  const notes = [];
+  if (state.layer === 'utfvi') notes.push('UTFVI là chỉ số so với trung bình của chính từng năm nên không dự báo trực tiếp — hiển thị dự báo <b>nhiệt độ bề mặt</b>.');
+  if (state.area.startsWith('province:')) notes.push(`Chưa có dự báo riêng cho cấp tỉnh — hiển thị <b>toàn vùng</b>. Chọn một quận/huyện để xem dự báo của quận/huyện đó.`);
+  if (scope !== 'all') notes.push('Dự báo cho một quận/huyện dựa trên 7 giá trị trung bình năm của riêng quận đó, nên kém chắc chắn hơn dự báo toàn vùng — hãy xem sai số kiểm định 2026.');
+  document.getElementById('fcScopeNote').innerHTML = notes.map(n => `<div>${n}</div>`).join('');
+  document.getElementById('fcTitle').textContent = `Dự báo ${name} · ${where} · 2027–2030`;
+  document.getElementById('btTitle').textContent = `Kiểm tra dự báo năm 2026 · ${name} · ${where}`;
+
+  if (fcChart) { fcChart.destroy(); fcChart = null; }
+  if (btChart) { btChart.destroy(); btChart = null; }
+  if (!f.available) {
+    document.getElementById('fcCards').innerHTML = '<div class="note">Chưa có kết quả dự báo cho lựa chọn này (notebook mục 11c).</div>';
+    document.getElementById('btCards').innerHTML = '';
+    fcChartCfg = btChartCfg = null;
+    return;
+  }
+  const opts = { responsive: true, maintainAspectRatio: false,
+    plugins: { legend: { labels: { color: '#5C6762', usePointStyle: true, boxWidth: 8 } } },
+    scales: { x: { type: 'linear', grid: { color: 'rgba(34,48,43,0.08)' }, ticks: { color: '#5C6762', stepSize: 1, callback: v => v } },
+              y: { title: { display: true, text: `${name}${unit ? ` (${unit})` : ''}`, color: '#5C6762' }, grid: { color: 'rgba(34,48,43,0.08)' }, ticks: { color: '#5C6762' } } } };
+  const obs = f.observed.filter(o => o.value !== null), last = obs[obs.length - 1];
+  fcChartCfg = { type: 'line', options: opts, data: { datasets: [
+    { label: 'Quan trắc 2020–2026', data: obs.map(o => ({ x: o.year, y: o.value })), borderColor: '#22302B', backgroundColor: '#22302B', borderWidth: 2.5, pointRadius: 4 },
+    { label: 'Dự báo tuyến tính', data: [{ x: last.year, y: last.value }, ...f.forecast.map(r => ({ x: r.year, y: r.linear }))], borderColor: '#0F766E', backgroundColor: '#0F766E', borderDash: [6, 4], borderWidth: 2, pointRadius: 4, pointStyle: 'rect' },
+    { label: 'Dự báo đa thức bậc 2', data: [{ x: last.year, y: last.value }, ...f.forecast.map(r => ({ x: r.year, y: r.poly }))], borderColor: '#F5A623', backgroundColor: '#F5A623', borderDash: [6, 4], borderWidth: 2, pointRadius: 4, pointStyle: 'triangle' },
+  ] } };
+  const rN = f.forecast[f.forecast.length - 1], u = unit ? `<small> ${unit}</small>` : '';
+  document.getElementById('fcCards').innerHTML = `
+    <div class="kpi"><div class="k">Mô hình tuyến tính · R² = ${fmt(f.r2_linear, 3)}</div><div class="v num">${fmt(rN.linear, dp)}${u}</div><div class="d">Dự báo năm ${rN.year} · ${f.forecast.map(r => `${r.year}: ${fmt(r.linear, dp)}`).join(' · ')}</div></div>
+    <div class="kpi"><div class="k">Mô hình đa thức bậc 2 · R² = ${fmt(f.r2_poly, 3)}</div><div class="v num">${fmt(rN.poly, dp)}${u}</div><div class="d">Dự báo năm ${rN.year} · ${f.forecast.map(r => `${r.year}: ${fmt(r.poly, dp)}`).join(' · ')}</div></div>`;
+
+  const bt = f.backtest, act = bt.actual_2026;
+  const card = (label, pred) => `<div class="kpi"><div class="k">${label} · huấn luyện 2020–2025</div>
+      <div class="v num">${fmtS(pred - act, dp)}${u}</div>
+      <div class="d">Dự báo 2026: <b class="num">${fmt(pred, dp)}${unit}</b> · Quan trắc thật: <b class="num">${fmt(act, dp)}${unit}</b> · Sai số tuyệt đối ${fmt(Math.abs(pred - act), dp)}${unit}</div></div>`;
+  document.getElementById('btCards').innerHTML = act === null ? '<div class="note">Không có giá trị quan trắc năm 2026 để kiểm định.</div>'
+    : card('Mô hình tuyến tính', bt.pred_linear) + card('Mô hình đa thức bậc 2', bt.pred_poly);
+  btChartCfg = act === null ? null : { type: 'bar',
+    data: { labels: ['Quan trắc thật', 'Mô hình tuyến tính', 'Mô hình đa thức bậc 2'],
+            datasets: [{ label: `${name} 2026`, data: [act, bt.pred_linear, bt.pred_poly],
+                         backgroundColor: ['rgba(34,48,43,0.75)', 'rgba(15,118,110,0.75)', 'rgba(245,166,35,0.8)'], borderRadius: 5, maxBarThickness: 70 }] },
+    options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false } },
+      scales: { x: { grid: { display: false }, ticks: { color: '#5C6762' } }, y: { beginAtZero: false, grid: { color: 'rgba(34,48,43,0.08)' }, ticks: { color: '#5C6762' } } } } };
+  // nếu tab đang mở thì vẽ lại ngay
+  const active = document.querySelector('.pane.active');
+  if (active) ensurePaneCharts(active.id);
+}
+
+// Chart.js cần khung đang hiển thị để đo kích thước -> chỉ tạo biểu đồ khi tab được mở lần đầu
+let fcChartCfg = null, btChartCfg = null;
+function makeChart(id, cfg) { return new Chart(document.getElementById(id), cfg); }
+function ensurePaneCharts(pane) {
+  if (pane === 'pForecast' && !fcChart && fcChartCfg) fcChart = makeChart('fcChart', fcChartCfg);
+  if (pane === 'pBacktest' && !btChart && btChartCfg) btChart = makeChart('btChart', btChartCfg);
+}
+
+// ---------------- Xuất CSV ----------------
+function exportCSV() {
+  const g = gridCache[state.year];
+  if (!g || !currentCells.length) return;
+  const head = ['nam', 'lat', 'lon', 'LST_C', 'NDVI', 'NDBI', 'NDWI', 'UTFVI', 'muc_UTFVI', 'ti_le_du_lieu', 'quan_huyen_GAUL2015', 'tinh_cu'];
+  const esc = v => (v === null || v === undefined) ? '' : (typeof v === 'string' && /[",\n]/.test(v) ? `"${v.replace(/"/g, '""')}"` : v);
+  const lines = currentCells.map(c => {
+    const d = c[DID] ? districtById[c[DID]] : null, u = cellValue(c, 'utfvi', g.lst_mean_year);
+    return [state.year, c[0].toFixed(6), c[1].toFixed(6), c[2], c[3], c[4], c[5], u, UTFVI_CLASSES[utfviClass(u)], c[COV],
+            d ? d.name_vi : '', d ? (PROVINCE_VI[d.province] || d.province) : ''].map(esc).join(',');
+  });
+  const blob = new Blob(['﻿' + head.join(',') + '\n' + lines.join('\n')], { type: 'text/csv;charset=utf-8' });
+  const a = document.createElement('a');
+  const slug = state.area === 'all' ? 'toan_vung' : areaLabel(state.area).normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/đ/g, 'd').replace(/Đ/g, 'D').replace(/[^\w]+/g, '_');
+  a.href = URL.createObjectURL(blob);
+  a.download = `luoi_1km_${state.year}_${slug}.csv`;
+  a.click();
+  URL.revokeObjectURL(a.href);
+}
+
+boot();
+</script>
+</body>
+</html>
